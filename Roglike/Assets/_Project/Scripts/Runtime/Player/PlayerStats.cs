@@ -37,6 +37,8 @@ namespace Project.Player
         {
             base.OnStartLocalPlayer();
 
+            Project.Progression.RunProgressTracker.EnsureRunStarted();
+
             int hpBonus = Project.Progression.MetaProgressionService.GetMaxHpMetaBonus();
             int dmgBonus = Project.Progression.MetaProgressionService.GetDamageMetaBonusPct();
             CmdApplyMetaProgression(hpBonus, dmgBonus);

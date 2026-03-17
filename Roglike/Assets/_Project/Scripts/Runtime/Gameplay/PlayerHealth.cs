@@ -26,11 +26,6 @@ namespace Project.Gameplay
                 return;
 
             CurrentHP -= amount;
-
-            // Thorns: отражаем урон атакующему (если мы знаем атакующего — сейчас нет)
-            // MVP: отражение пока отключим, потому что TakeDamage не знает "кто ударил".
-            // Сделаем правильнее: добавим перегрузку TakeDamage(amount, attacker).
-
             Debug.Log($"[PlayerHealth] hpAfter={CurrentHP}");
 
             if (CurrentHP <= 0)
@@ -45,15 +40,17 @@ namespace Project.Gameplay
         {
             TakeDamage(amount);
 
-            if (attacker == null) return;
+            if (attacker == null)
+                return;
 
             var stats = GetComponent<Project.Player.PlayerStats>();
-            if (stats == null) return;
+            if (stats == null)
+                return;
 
             int thorns = stats.ThornsFlat;
-            if (thorns <= 0) return;
+            if (thorns <= 0)
+                return;
 
-            // если атакующий — EnemyHealth
             var enemyHp = attacker.GetComponent<Project.Gameplay.EnemyHealth>();
             if (enemyHp != null)
             {
@@ -65,10 +62,23 @@ namespace Project.Gameplay
         [ClientRpc]
         private void RpcOnDeath()
         {
-            // MVP: просто отключаем управление
             var controller = GetComponent<Project.Player.PlayerController>();
             if (controller != null)
                 controller.enabled = false;
+
+            if (isLocalPlayer)
+            {
+                int segmentReached = 1;
+                var session = FindFirstObjectByType<Project.Networking.RunSessionNetworkState>();
+                if (session != null)
+                    segmentReached = Mathf.Max(1, session.SegmentIndex);
+
+                int essenceEarned = Project.Progression.RunProgressTracker.GetRunEssenceEarned();
+                Project.Progression.RunProgressTracker.FinalizeRun(segmentReached);
+                int bestSegment = Project.Progression.RunProgressTracker.GetBestSegment();
+
+                Project.UI.RunEndUI.Instance?.ShowForLocalDeath(segmentReached, essenceEarned, bestSegment);
+            }
 
             Debug.Log($"[PlayerHealth] Player died: {netId}");
         }
@@ -92,7 +102,6 @@ namespace Project.Gameplay
             }
             else
             {
-                // Если maxHP вырос — можно “добавить” разницу к текущему (приятно ощущается)
                 int delta = newMax - oldMax;
                 if (delta > 0)
                     CurrentHP = Mathf.Min(CurrentHP + delta, MaxHP);
@@ -106,8 +115,8 @@ namespace Project.Gameplay
         [Server]
         public void ServerHeal(int amount)
         {
-            if (amount <= 0) return;
-            if (CurrentHP <= 0) return;
+            if (amount <= 0 || CurrentHP <= 0)
+                return;
 
             CurrentHP = Mathf.Min(CurrentHP + amount, MaxHP);
         }
@@ -118,6 +127,5 @@ namespace Project.Gameplay
             EquipmentHpBonus = Mathf.Max(0, value);
             ServerRecalculateMaxHpFromStats(fillToFull: false);
         }
-        
     }
 }

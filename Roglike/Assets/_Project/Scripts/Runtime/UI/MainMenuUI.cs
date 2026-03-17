@@ -13,6 +13,10 @@ namespace Project.UI
         [SerializeField] private Text metaCurrencyText;
         [SerializeField] private Text metaHpText;
         [SerializeField] private Text metaDmgText;
+        [SerializeField] private Text metaHpNextText;
+        [SerializeField] private Text metaDmgNextText;
+        [SerializeField] private Button buyMetaHpButton;
+        [SerializeField] private Button buyMetaDamageButton;
 
         private void Start()
         {
@@ -39,13 +43,19 @@ namespace Project.UI
 
         public void OnBuyMetaHpClicked()
         {
-            Project.Progression.MetaProgressionService.TryBuy(Project.Progression.MetaUpgradeType.MaxHp);
+            bool bought = Project.Progression.MetaProgressionService.TryBuy(Project.Progression.MetaUpgradeType.MaxHp);
+            if (!bought)
+                Debug.Log("[MainMenuUI] Buy Meta HP failed (not enough Essence or max level).");
+
             RefreshMetaUi();
         }
 
         public void OnBuyMetaDamageClicked()
         {
-            Project.Progression.MetaProgressionService.TryBuy(Project.Progression.MetaUpgradeType.DamagePct);
+            bool bought = Project.Progression.MetaProgressionService.TryBuy(Project.Progression.MetaUpgradeType.DamagePct);
+            if (!bought)
+                Debug.Log("[MainMenuUI] Buy Meta Damage failed (not enough Essence or max level).");
+
             RefreshMetaUi();
         }
 
@@ -65,20 +75,47 @@ namespace Project.UI
             int hpCost = Project.Progression.MetaProgressionService.GetUpgradeCost(Project.Progression.MetaUpgradeType.MaxHp, hpLevel);
             int dmgCost = Project.Progression.MetaProgressionService.GetUpgradeCost(Project.Progression.MetaUpgradeType.DamagePct, dmgLevel);
 
+            bool hpMaxed = hpLevel >= Project.Progression.MetaProgressionService.MaxLevelPerUpgrade;
+            bool dmgMaxed = dmgLevel >= Project.Progression.MetaProgressionService.MaxLevelPerUpgrade;
+
             if (metaCurrencyText != null)
                 metaCurrencyText.text = $"Essence: {currency}";
 
             if (metaHpText != null)
             {
                 int hpBonus = Project.Progression.MetaProgressionService.GetMaxHpMetaBonus();
-                metaHpText.text = $"Meta HP Lv.{hpLevel}  (+{hpBonus} Max HP)  Cost: {hpCost}";
+                metaHpText.text = hpMaxed
+                    ? $"Meta HP Lv.{hpLevel}  (+{hpBonus} Max HP)  [MAX]"
+                    : $"Meta HP Lv.{hpLevel}  (+{hpBonus} Max HP)  Cost: {hpCost}";
             }
 
             if (metaDmgText != null)
             {
                 int dmgBonus = Project.Progression.MetaProgressionService.GetDamageMetaBonusPct();
-                metaDmgText.text = $"Meta Damage Lv.{dmgLevel}  (+{dmgBonus}% Damage)  Cost: {dmgCost}";
+                metaDmgText.text = dmgMaxed
+                    ? $"Meta Damage Lv.{dmgLevel}  (+{dmgBonus}% Damage)  [MAX]"
+                    : $"Meta Damage Lv.{dmgLevel}  (+{dmgBonus}% Damage)  Cost: {dmgCost}";
             }
+
+            if (metaHpNextText != null)
+            {
+                metaHpNextText.text = hpMaxed
+                    ? "Next: MAX"
+                    : $"Next: +{Project.Progression.MetaProgressionService.HpPerLevel} Max HP";
+            }
+
+            if (metaDmgNextText != null)
+            {
+                metaDmgNextText.text = dmgMaxed
+                    ? "Next: MAX"
+                    : $"Next: +{Project.Progression.MetaProgressionService.DamagePctPerLevel}% Damage";
+            }
+
+            if (buyMetaHpButton != null)
+                buyMetaHpButton.interactable = !hpMaxed && currency >= hpCost;
+
+            if (buyMetaDamageButton != null)
+                buyMetaDamageButton.interactable = !dmgMaxed && currency >= dmgCost;
         }
     }
 }

@@ -92,6 +92,7 @@ namespace Project.Rewards
                 return;
 
             Project.Progression.MetaProgressionService.AddCurrency(amount);
+            Project.Progression.RunProgressTracker.AddRunEssence(amount);
             RewardUI.Instance?.ClientOnMetaCurrencyGained(amount);
         }
 
