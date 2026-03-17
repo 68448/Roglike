@@ -1,0 +1,6 @@
+*
+!/.gitignore
+!/Roglike/
+/Roglike/*
+!/Roglike/Assets/
+!/Roglike/Assets/**
