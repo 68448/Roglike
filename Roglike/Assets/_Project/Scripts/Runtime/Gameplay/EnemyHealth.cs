@@ -1,4 +1,6 @@
 using Mirror;
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Project.WorldGen;
 
@@ -17,6 +19,27 @@ namespace Project.Gameplay
         [SerializeField] private int maxHP = 30;
         [SyncVar] public int BaseHP;
         private bool _isDead;
+
+        [Header("Combat Feedback")]
+        [SerializeField] private float hitFlashDuration = 0.08f;
+        [SerializeField] private Color hitFlashColor = new Color(1f, 0.35f, 0.35f, 1f);
+        [SerializeField] private Vector3 floatingDamageOffset = new Vector3(0f, 1.6f, 0f);
+        [SerializeField] private Color floatingDamageColor = new Color(1f, 0.95f, 0.65f, 1f);
+
+        private Renderer[] _renderers;
+        private MaterialPropertyBlock _block;
+        private Coroutine _flashRoutine;
+        private readonly Dictionary<Renderer, Color> _savedBaseColors = new Dictionary<Renderer, Color>();
+        private readonly Dictionary<Renderer, Color> _savedColorColors = new Dictionary<Renderer, Color>();
+
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+
+        private void Awake()
+        {
+            _renderers = GetComponentsInChildren<Renderer>(true);
+            _block = new MaterialPropertyBlock();
+        }
 
         public override void OnStartServer()
         {
@@ -45,10 +68,14 @@ namespace Project.Gameplay
             if (amount <= 0) return;
 
             CurrentHP -= amount;
+            if (CurrentHP < 0)
+                CurrentHP = 0;
+
+            RpcOnHitFeedback(amount, transform.position + floatingDamageOffset);
+
             if (CurrentHP <= 0)
             {
                 _isDead = true;
-                CurrentHP = 0;
                 var controller = FindFirstObjectByType<Project.WorldGen.ChunkDungeonController>();
                 if (controller != null)
                     controller.ServerNotifyEnemyDied(SegmentIndex, RoomId);
@@ -66,6 +93,96 @@ namespace Project.Gameplay
                 }
                 NetworkServer.Destroy(gameObject);
             }
+        }
+
+        [ClientRpc]
+        private void RpcOnHitFeedback(int damage, Vector3 worldPos)
+        {
+            if (damage > 0)
+                Project.UI.FloatingDamageText.Spawn(worldPos, damage, floatingDamageColor);
+
+            if (!isActiveAndEnabled)
+                return;
+
+            if (_flashRoutine != null)
+                StopCoroutine(_flashRoutine);
+
+            _flashRoutine = StartCoroutine(HitFlashRoutine());
+        }
+
+        private IEnumerator HitFlashRoutine()
+        {
+            if (_renderers == null || _renderers.Length == 0)
+                yield break;
+
+            _savedBaseColors.Clear();
+            _savedColorColors.Clear();
+
+            for (int i = 0; i < _renderers.Length; i++)
+            {
+                var r = _renderers[i];
+                if (r == null)
+                    continue;
+
+                Color baseCol = ReadCurrentColor(r, BaseColorId, "_BaseColor");
+                Color stdCol = ReadCurrentColor(r, ColorId, "_Color");
+
+                _savedBaseColors[r] = baseCol;
+                _savedColorColors[r] = stdCol;
+
+                r.GetPropertyBlock(_block);
+                _block.SetColor(BaseColorId, Color.Lerp(baseCol, hitFlashColor, 0.8f));
+                _block.SetColor(ColorId, Color.Lerp(stdCol, hitFlashColor, 0.8f));
+                r.SetPropertyBlock(_block);
+            }
+
+            yield return new WaitForSeconds(hitFlashDuration);
+
+            foreach (var kv in _savedBaseColors)
+            {
+                if (kv.Key == null)
+                    continue;
+
+                kv.Key.GetPropertyBlock(_block);
+                _block.SetColor(BaseColorId, kv.Value);
+                kv.Key.SetPropertyBlock(_block);
+            }
+
+            foreach (var kv in _savedColorColors)
+            {
+                if (kv.Key == null)
+                    continue;
+
+                kv.Key.GetPropertyBlock(_block);
+                _block.SetColor(ColorId, kv.Value);
+                kv.Key.SetPropertyBlock(_block);
+            }
+
+            _flashRoutine = null;
+        }
+
+        private Color ReadCurrentColor(Renderer renderer, int colorId, string shaderPropName)
+        {
+            if (renderer == null)
+                return Color.white;
+
+            renderer.GetPropertyBlock(_block);
+            Color fromBlock = _block.GetColor(colorId);
+
+            bool blockHasValue =
+                !Mathf.Approximately(fromBlock.a, 0f) ||
+                !Mathf.Approximately(fromBlock.r, 0f) ||
+                !Mathf.Approximately(fromBlock.g, 0f) ||
+                !Mathf.Approximately(fromBlock.b, 0f);
+
+            if (blockHasValue)
+                return fromBlock;
+
+            var mat = renderer.sharedMaterial;
+            if (mat != null && mat.HasProperty(shaderPropName))
+                return mat.GetColor(shaderPropName);
+
+            return Color.white;
         }
 
         [Server]
