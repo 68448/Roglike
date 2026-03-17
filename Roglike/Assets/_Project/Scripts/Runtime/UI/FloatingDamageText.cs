@@ -10,13 +10,15 @@ namespace Project.UI
         [SerializeField] private float horizontalDrift = 0.5f;
         [SerializeField] private float startScale = 1f;
         [SerializeField] private float endScale = 1.2f;
+        [SerializeField] private float critScaleMultiplier = 1.28f;
+        [SerializeField] private string critPrefix = "CRIT ";
 
         private TextMeshPro _text;
         private Vector3 _velocity;
         private Color _startColor;
         private float _t;
 
-        public static void Spawn(Vector3 worldPos, int amount, Color color)
+        public static void Spawn(Vector3 worldPos, int amount, Color color, bool isCritical = false)
         {
             GameObject go = new GameObject("FloatingDamageText");
             go.transform.position = worldPos;
@@ -33,13 +35,13 @@ namespace Project.UI
                 text.font = TMP_Settings.defaultFontAsset;
 
             var fx = go.AddComponent<FloatingDamageText>();
-            fx.Init(text, amount, color);
+            fx.Init(text, amount, color, isCritical);
         }
 
-        private void Init(TextMeshPro text, int amount, Color color)
+        private void Init(TextMeshPro text, int amount, Color color, bool isCritical)
         {
             _text = text;
-            _text.text = amount.ToString();
+            _text.text = isCritical ? $"{critPrefix}{amount}" : amount.ToString();
             _text.color = color;
 
             _startColor = color;
@@ -47,6 +49,15 @@ namespace Project.UI
 
             float drift = Random.Range(-horizontalDrift, horizontalDrift);
             _velocity = new Vector3(drift, riseSpeed, 0f);
+
+            if (isCritical)
+            {
+                _velocity.y *= 1.12f;
+                startScale *= critScaleMultiplier;
+                endScale *= critScaleMultiplier;
+                lifetime *= 1.12f;
+            }
+
             transform.localScale = Vector3.one * startScale;
         }
 

@@ -25,6 +25,7 @@ namespace Project.Gameplay
         [SerializeField] private Color hitFlashColor = new Color(1f, 0.35f, 0.35f, 1f);
         [SerializeField] private Vector3 floatingDamageOffset = new Vector3(0f, 1.6f, 0f);
         [SerializeField] private Color floatingDamageColor = new Color(1f, 0.95f, 0.65f, 1f);
+        [SerializeField] private Color floatingCritDamageColor = new Color(1f, 0.45f, 0.2f, 1f);
 
         private Renderer[] _renderers;
         private MaterialPropertyBlock _block;
@@ -62,6 +63,12 @@ namespace Project.Gameplay
         [Server]
         public void TakeDamage(int amount)
         {
+            TakeDamage(amount, false);
+        }
+
+        [Server]
+        public void TakeDamage(int amount, bool isCritical)
+        {
             if (_isDead || CurrentHP <= 0)
                 return;
 
@@ -71,7 +78,7 @@ namespace Project.Gameplay
             if (CurrentHP < 0)
                 CurrentHP = 0;
 
-            RpcOnHitFeedback(amount, transform.position + floatingDamageOffset);
+            RpcOnHitFeedback(amount, transform.position + floatingDamageOffset, isCritical);
 
             if (CurrentHP <= 0)
             {
@@ -96,10 +103,13 @@ namespace Project.Gameplay
         }
 
         [ClientRpc]
-        private void RpcOnHitFeedback(int damage, Vector3 worldPos)
+        private void RpcOnHitFeedback(int damage, Vector3 worldPos, bool isCritical)
         {
             if (damage > 0)
-                Project.UI.FloatingDamageText.Spawn(worldPos, damage, floatingDamageColor);
+            {
+                var color = isCritical ? floatingCritDamageColor : floatingDamageColor;
+                Project.UI.FloatingDamageText.Spawn(worldPos, damage, color, isCritical);
+            }
 
             if (!isActiveAndEnabled)
                 return;

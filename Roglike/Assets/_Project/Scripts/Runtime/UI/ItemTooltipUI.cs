@@ -161,6 +161,12 @@ namespace Project.UI
             if (item.MoveSpeedPctBonus != 0)
                 sb.AppendLine($"+{item.MoveSpeedPctBonus}% Move Speed");
 
+            if (item.CritChancePct != 0)
+                sb.AppendLine($"+{item.CritChancePct}% Crit Chance");
+
+            if (item.CritDamageBonusPct != 0)
+                sb.AppendLine($"+{item.CritDamageBonusPct}% Crit Damage");
+
             if (sb.Length == 0)
                 sb.Append("-");
 
@@ -190,7 +196,9 @@ namespace Project.UI
             sb.AppendLine($"Compare vs {equipped.ItemName}:");
             sb.AppendLine(BuildDeltaLine("Damage", hovered.DamageBonus - equipped.DamageBonus));
             sb.AppendLine(BuildDeltaLine("Max HP", hovered.MaxHpBonus - equipped.MaxHpBonus));
-            sb.Append(BuildDeltaLine("Move Speed %", hovered.MoveSpeedPctBonus - equipped.MoveSpeedPctBonus));
+            sb.AppendLine(BuildDeltaLine("Move Speed %", hovered.MoveSpeedPctBonus - equipped.MoveSpeedPctBonus));
+            sb.AppendLine(BuildDeltaLine("Crit Chance %", hovered.CritChancePct - equipped.CritChancePct));
+            sb.Append(BuildDeltaLine("Crit Damage %", hovered.CritDamageBonusPct - equipped.CritDamageBonusPct));
             return sb.ToString();
         }
 

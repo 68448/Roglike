@@ -24,6 +24,8 @@ namespace Project.Items
         public int DamageBonus = 0;
         public int MaxHpBonus = 0;
         public int MoveSpeedPctBonus = 0;
+        public int CritChancePct = 0;
+        public int CritDamageBonusPct = 0;
 
         [Header("Drop")]
         public ItemRarity Rarity = ItemRarity.Common;
