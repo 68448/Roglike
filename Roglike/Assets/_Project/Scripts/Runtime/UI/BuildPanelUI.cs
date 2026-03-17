@@ -42,7 +42,7 @@ namespace Project.UI
 
             inventoryGrid?.BindToLocalPlayer(itemTooltip);
             equipmentPanel?.BindToLocalPlayer(itemTooltip);
-            itemTooltip?.Bind(this, GetLocalEquipmentController());
+            itemTooltip?.Bind(this, GetLocalEquipmentController(), GetLocalEquipment());
             RefreshStats();
         }
 
@@ -86,7 +86,7 @@ namespace Project.UI
 
             var equipController = GetLocalEquipmentController();
             if (itemTooltip != null)
-                itemTooltip.Bind(this, equipController);
+                itemTooltip.Bind(this, equipController, GetLocalEquipment());
 
             RefreshAllPanels();
         }

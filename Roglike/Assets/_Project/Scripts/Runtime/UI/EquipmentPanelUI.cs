@@ -1,6 +1,7 @@
-using Mirror;
+﻿using Mirror;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 namespace Project.UI
 {
@@ -50,6 +51,13 @@ namespace Project.UI
                     break;
                 }
             }
+
+            BindHover(weaponButton, () => OnSlotHoverEnter(_equip != null ? _equip.WeaponItemId : 0));
+            BindHover(helmetButton, () => OnSlotHoverEnter(_equip != null ? _equip.HelmetItemId : 0));
+            BindHover(chestButton, () => OnSlotHoverEnter(_equip != null ? _equip.ChestItemId : 0));
+            BindHover(bootsButton, () => OnSlotHoverEnter(_equip != null ? _equip.BootsItemId : 0));
+            BindHover(ringButton, () => OnSlotHoverEnter(_equip != null ? _equip.RingItemId : 0));
+            BindHover(amuletButton, () => OnSlotHoverEnter(_equip != null ? _equip.AmuletItemId : 0));
 
             Refresh();
         }
@@ -153,9 +161,63 @@ namespace Project.UI
             {
                 if (all[i] != null && all[i].Id == itemId)
                 {
-                    _tooltip?.Show(all[i], true);
+                    _tooltip?.Show(all[i], fromEquipment: true, pinned: true);
                     return;
                 }
+            }
+        }
+
+        private void OnSlotHoverEnter(int itemId)
+        {
+            if (_tooltip == null || itemId <= 0)
+                return;
+
+            var all = Resources.LoadAll<Project.Items.ItemData>("Items");
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] != null && all[i].Id == itemId)
+                {
+                    _tooltip.Show(all[i], fromEquipment: true, pinned: false);
+                    return;
+                }
+            }
+        }
+
+        private void OnSlotHoverExit()
+        {
+            _tooltip?.TryHideHover();
+        }
+
+        private void BindHover(Button button, System.Action onEnter)
+        {
+            if (button == null)
+                return;
+
+            var trigger = button.GetComponent<EventTrigger>();
+            if (trigger == null)
+                trigger = button.gameObject.AddComponent<EventTrigger>();
+
+            if (trigger.triggers == null)
+                trigger.triggers = new System.Collections.Generic.List<EventTrigger.Entry>();
+
+            RemoveEvent(trigger, EventTriggerType.PointerEnter);
+            RemoveEvent(trigger, EventTriggerType.PointerExit);
+
+            var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+            enter.callback.AddListener(_ => onEnter?.Invoke());
+            trigger.triggers.Add(enter);
+
+            var exit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
+            exit.callback.AddListener(_ => OnSlotHoverExit());
+            trigger.triggers.Add(exit);
+        }
+
+        private static void RemoveEvent(EventTrigger trigger, EventTriggerType type)
+        {
+            for (int i = trigger.triggers.Count - 1; i >= 0; i--)
+            {
+                if (trigger.triggers[i] != null && trigger.triggers[i].eventID == type)
+                    trigger.triggers.RemoveAt(i);
             }
         }
 
@@ -218,3 +280,4 @@ namespace Project.UI
 
     }
 }
+

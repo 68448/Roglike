@@ -1,4 +1,5 @@
 using Mirror;
+using UnityEngine.EventSystems;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -64,6 +65,7 @@ namespace Project.UI
                 {
                     slotButtons[i].onClick.RemoveAllListeners();
                     slotButtons[i].onClick.AddListener(() => OnSlotClicked(slotIndex));
+                    BindHover(slotButtons[i], slotIndex);
                 }
             }
         }
@@ -104,12 +106,79 @@ namespace Project.UI
             Debug.Log($"[InventoryGridUI] Tooltip ref is {(_tooltip != null ? "OK" : "NULL")}, picked={(picked != null ? picked.ItemName : "NULL")}");
             if (_tooltip != null)
             {
-                _tooltip.Show(picked);
+                _tooltip.Show(picked, fromEquipment: false, pinned: true);
             }
             else
             {
                 Debug.LogWarning("[InventoryGridUI] Tooltip is null. Assign ItemTooltipUI in BuildPanelUI or keep tooltip object in scene.");
             }
+        }
+
+        private void OnSlotHoverEnter(int slotIndex)
+        {
+            if (_tooltip == null || _inv == null)
+                return;
+
+            if (slotIndex < 0 || slotIndex >= _inv.ItemIds.Count)
+                return;
+
+            int itemId = _inv.ItemIds[slotIndex];
+            if (itemId <= 0)
+                return;
+
+            var picked = FindItemData(itemId);
+            if (picked != null)
+                _tooltip.Show(picked, fromEquipment: false, pinned: false);
+        }
+
+        private void OnSlotHoverExit()
+        {
+            _tooltip?.TryHideHover();
+        }
+
+        private void BindHover(Button button, int slotIndex)
+        {
+            if (button == null)
+                return;
+
+            var trigger = button.GetComponent<EventTrigger>();
+            if (trigger == null)
+                trigger = button.gameObject.AddComponent<EventTrigger>();
+
+            if (trigger.triggers == null)
+                trigger.triggers = new System.Collections.Generic.List<EventTrigger.Entry>();
+
+            RemoveEvent(trigger, EventTriggerType.PointerEnter);
+            RemoveEvent(trigger, EventTriggerType.PointerExit);
+
+            var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+            enter.callback.AddListener(_ => OnSlotHoverEnter(slotIndex));
+            trigger.triggers.Add(enter);
+
+            var exit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
+            exit.callback.AddListener(_ => OnSlotHoverExit());
+            trigger.triggers.Add(exit);
+        }
+
+        private static void RemoveEvent(EventTrigger trigger, EventTriggerType type)
+        {
+            for (int i = trigger.triggers.Count - 1; i >= 0; i--)
+            {
+                if (trigger.triggers[i] != null && trigger.triggers[i].eventID == type)
+                    trigger.triggers.RemoveAt(i);
+            }
+        }
+
+        private static Project.Items.ItemData FindItemData(int itemId)
+        {
+            var all = Resources.LoadAll<Project.Items.ItemData>("Items");
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] != null && all[i].Id == itemId)
+                    return all[i];
+            }
+
+            return null;
         }
 
         private void EnsureTooltipRef()
