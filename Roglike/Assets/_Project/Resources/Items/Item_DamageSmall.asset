@@ -21,6 +21,8 @@ MonoBehaviour:
   DamageBonus: 5
   MaxHpBonus: 0
   MoveSpeedPctBonus: 0
+  CritChancePct: 0
+  CritDamageBonusPct: 30
   Rarity: 0
   MinDropSegment: 1
   DropWeight: 10
