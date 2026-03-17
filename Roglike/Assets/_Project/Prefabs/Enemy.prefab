@@ -526,11 +526,16 @@ MonoBehaviour:
   syncDirection: 0
   syncMode: 0
   syncInterval: 0
-  CurrentHP: 0
+  CurrentHP: 50
   SegmentIndex: 0
   RoomId: 0
   MaxHP: 0
   maxHP: 30
+  BaseHP: 0
+  hitFlashDuration: 0.08
+  hitFlashColor: {r: 1, g: 0.35, b: 0.35, a: 1}
+  floatingDamageOffset: {x: 0, y: 1.6, z: 0}
+  floatingDamageColor: {r: 1, g: 0.95, b: 0.65, a: 1}
 --- !u!114 &5343821105632635892
 MonoBehaviour:
   m_ObjectHideFlags: 0
