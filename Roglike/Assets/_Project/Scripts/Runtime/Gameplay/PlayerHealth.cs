@@ -78,10 +78,11 @@ namespace Project.Gameplay
         {
             var stats = GetComponent<Project.Player.PlayerStats>();
 
-            int bonus = (stats != null) ? stats.BonusMaxHp : 0;
+            int runBonus = (stats != null) ? stats.BonusMaxHp : 0;
+            int metaBonus = (stats != null) ? stats.MetaMaxHpBonus : 0;
 
             int oldMax = MaxHP > 0 ? MaxHP : Mathf.Max(1, baseMaxHP);
-            int newMax = Mathf.Max(1, baseMaxHP + bonus + EquipmentHpBonus);
+            int newMax = Mathf.Max(1, baseMaxHP + runBonus + metaBonus + EquipmentHpBonus);
 
             MaxHP = newMax;
 

@@ -17,6 +17,7 @@ namespace Project.Rewards
         [SerializeField] private Text label0;
         [SerializeField] private Text label1;
         [SerializeField] private Text label2;
+        [SerializeField] private Text statusText;
 
         private RewardOrb _currentOrb;
         private NetworkIdentity _localPlayerNi;
@@ -96,6 +97,14 @@ namespace Project.Rewards
         public void ClientOnPickedConfirmed()
         {
             Hide();
+        }
+
+        public void ClientOnMetaCurrencyGained(int amount)
+        {
+            if (statusText != null)
+                statusText.text = $"+{amount} Essence (meta)";
+
+            Debug.Log($"[RewardUI] Meta currency gained +{amount}. Total={Project.Progression.MetaProgressionService.GetCurrency()}");
         }
 
         private string ToText(Project.Player.RewardRarity rarity, RewardKind kind, int value)

@@ -5,10 +5,9 @@ namespace Project.Player
 {
     public enum RewardKind : int
     {
-        MaxHpFlat = 1,      // +X к maxHP
-        DamagePct = 2,      // +X% урон
-        MoveSpeedPct = 3,    // +X% скорость
-
+        MaxHpFlat = 1,
+        DamagePct = 2,
+        MoveSpeedPct = 3,
         LifestealPct = 4,
         ThornsFlat = 5,
         RegenPer10s = 6,
@@ -17,19 +16,46 @@ namespace Project.Player
 
     public sealed class PlayerStats : NetworkBehaviour
     {
-        [Header("Synced Stats")]
-        [SyncVar] public int BonusMaxHp;        // например +10, +20
-        [SyncVar] public int BonusDamagePct;    // например +10 => +10%
-        [SyncVar] public int BonusMoveSpeedPct; // например +10 => +10%
-        [SyncVar] public int LifestealPct;      // 0..100 (например 5 = 5%)
-        [SyncVar] public int ThornsFlat;        // фикс отражение урона
-        [SyncVar] public int RegenPer10s;       // сколько HP за 10 секунд
-        [SyncVar] public int BossDamagePct;     // +% урона по боссам
+        [Header("Run Stats (Synced)")]
+        [SyncVar] public int BonusMaxHp;
+        [SyncVar] public int BonusDamagePct;
+        [SyncVar] public int BonusMoveSpeedPct;
+        [SyncVar] public int LifestealPct;
+        [SyncVar] public int ThornsFlat;
+        [SyncVar] public int RegenPer10s;
+        [SyncVar] public int BossDamagePct;
         [SyncVar] public int EquipmentMoveSpeedPctBonus;
 
-        // Удобные геттеры (для других систем)
-        public float DamageMultiplier => 1f + (BonusDamagePct / 100f);
+        [Header("Meta Stats (Synced)")]
+        [SyncVar] public int MetaMaxHpBonus;
+        [SyncVar] public int MetaDamagePctBonus;
+
+        public float DamageMultiplier => 1f + ((BonusDamagePct + MetaDamagePctBonus) / 100f);
         public float MoveSpeedMultiplier => 1f + ((BonusMoveSpeedPct + EquipmentMoveSpeedPctBonus) / 100f);
+
+        public override void OnStartLocalPlayer()
+        {
+            base.OnStartLocalPlayer();
+
+            int hpBonus = Project.Progression.MetaProgressionService.GetMaxHpMetaBonus();
+            int dmgBonus = Project.Progression.MetaProgressionService.GetDamageMetaBonusPct();
+            CmdApplyMetaProgression(hpBonus, dmgBonus);
+        }
+
+        [Command]
+        private void CmdApplyMetaProgression(int metaHpBonus, int metaDamagePctBonus)
+        {
+            int hpCap = Project.Progression.MetaProgressionService.MaxLevelPerUpgrade *
+                        Project.Progression.MetaProgressionService.HpPerLevel;
+            int dmgCap = Project.Progression.MetaProgressionService.MaxLevelPerUpgrade *
+                         Project.Progression.MetaProgressionService.DamagePctPerLevel;
+
+            MetaMaxHpBonus = Mathf.Clamp(metaHpBonus, 0, hpCap);
+            MetaDamagePctBonus = Mathf.Clamp(metaDamagePctBonus, 0, dmgCap);
+
+            ServerTryApplyToHealth();
+            Debug.Log($"[PlayerStats] Meta applied netId={netId} metaHP={MetaMaxHpBonus} metaDMG%={MetaDamagePctBonus}");
+        }
 
         [Server]
         public void ServerSetEquipmentMoveSpeedPctBonus(int value)
@@ -69,27 +95,20 @@ namespace Project.Player
 
                 case RewardKind.BossDamagePct:
                     BossDamagePct += Mathf.Max(1, value);
-                    break;    
+                    break;
             }
 
-            Debug.Log($"[PlayerStats] Applied reward {kind} value={value} to player netId={netId}. " +
-                      $"Now: +HP={BonusMaxHp}, +DMG%={BonusDamagePct}, +SPD%={BonusMoveSpeedPct}");
+            Debug.Log(
+                $"[PlayerStats] Applied reward {kind} value={value} netId={netId} " +
+                $"Now: runHP={BonusMaxHp}, runDMG%={BonusDamagePct}, runSPD%={BonusMoveSpeedPct}");
         }
 
-        // Применяем +HP сразу к текущему здоровью (чтобы игрок видел эффект)
         [Server]
         private void ServerTryApplyToHealth()
         {
-            // Если у тебя есть PlayerHealth — подстроимся.
-            // Название класса может отличаться. Ниже делаем максимально безопасно:
-            // ищем компонент с методом ServerAddMaxHp(int) или полями/методами, если у тебя они уже есть.
             var health = GetComponent<Project.Gameplay.PlayerHealth>();
             if (health != null)
-            {
-                // Предположим, что в PlayerHealth есть такие методы.
-                // Если их нет — скажи, я подгоню под твой PlayerHealth.
                 health.ServerRecalculateMaxHpFromStats(fillToFull: false);
-            }
         }
     }
 }

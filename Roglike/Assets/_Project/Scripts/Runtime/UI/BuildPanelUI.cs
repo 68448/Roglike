@@ -156,6 +156,7 @@ namespace Project.UI
             float spdMul = _stats.MoveSpeedMultiplier;
 
             int rewardHpBonus = _stats.BonusMaxHp;
+            int metaHpBonus = _stats.MetaMaxHpBonus;
             int equipmentHpBonus = _hp.EquipmentHpBonus;
 
             int rewardSpeedBonus = _stats.BonusMoveSpeedPct;
@@ -188,9 +189,10 @@ namespace Project.UI
             statsText.text =
                 $"HP: {cur}/{max}\n" +
                 $"Reward HP Bonus: +{rewardHpBonus}\n" +
+                $"Meta HP Bonus: +{metaHpBonus}\n" +
                 $"Equipment HP Bonus: +{equipmentHpBonus}\n\n" +
 
-                $"Damage Multiplier: x{dmgMul:0.00} (+{_stats.BonusDamagePct}%)\n" +
+                $"Damage Multiplier: x{dmgMul:0.00} (Run +{_stats.BonusDamagePct}% / Meta +{_stats.MetaDamagePctBonus}%)\n" +
                 $"Weapon: {weaponName}\n" +
                 $"Weapon Damage Bonus: +{weaponDamageBonus}\n\n" +
 
