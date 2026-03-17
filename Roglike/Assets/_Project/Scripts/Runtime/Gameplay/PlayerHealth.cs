@@ -10,6 +10,13 @@ namespace Project.Gameplay
         [SyncVar] public int EquipmentHpBonus;
 
         [SerializeField] private int baseMaxHP = 100;
+        private bool _localDeathHandled;
+
+        public override void OnStartLocalPlayer()
+        {
+            base.OnStartLocalPlayer();
+            _localDeathHandled = false;
+        }
 
         public override void OnStartServer()
         {
@@ -66,14 +73,24 @@ namespace Project.Gameplay
             if (controller != null)
                 controller.enabled = false;
 
-            if (isLocalPlayer)
+            if (isLocalPlayer && !_localDeathHandled)
             {
+                _localDeathHandled = true;
+
                 int segmentReached = 1;
                 var session = FindFirstObjectByType<Project.Networking.RunSessionNetworkState>();
                 if (session != null)
                     segmentReached = Mathf.Max(1, session.SegmentIndex);
 
-                int essenceEarned = Project.Progression.RunProgressTracker.GetRunEssenceEarned();
+                int essenceEarned = 0;
+                var stats = GetComponent<Project.Player.PlayerStats>();
+                if (stats != null)
+                    essenceEarned = Mathf.Max(0, stats.RunEssenceEarned);
+
+                // Bank run currency once, right at run end.
+                if (essenceEarned > 0)
+                    Project.Progression.MetaProgressionService.AddCurrency(essenceEarned);
+
                 Project.Progression.RunProgressTracker.FinalizeRun(segmentReached);
                 int bestSegment = Project.Progression.RunProgressTracker.GetBestSegment();
 

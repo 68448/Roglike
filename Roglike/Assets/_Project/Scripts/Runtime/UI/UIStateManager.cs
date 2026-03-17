@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Mirror;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Project.UI
 {
@@ -44,6 +45,16 @@ namespace Project.UI
             ApplyState();
         }
 
+        private void OnEnable()
+        {
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void OnDisable()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
         /// <summary>Открыть UI-режим (добавить токен).</summary>
         public void Push(string token)
         {
@@ -80,6 +91,19 @@ namespace Project.UI
         {
             EnsureLocalPlayerCached();
 
+            // In menu-like scenes we always keep cursor visible and unlocked.
+            string scene = SceneManager.GetActiveScene().name;
+            if (scene == "MainMenu" || scene == "Lobby")
+            {
+                Cursor.visible = true;
+                Cursor.lockState = CursorLockMode.None;
+
+                if (_cachedController != null)
+                    _cachedController.enabled = false;
+
+                return;
+            }
+
             if (IsUIOpen)
             {
                 Cursor.visible = true;
@@ -96,6 +120,11 @@ namespace Project.UI
                 if (_cachedController != null)
                     _cachedController.enabled = true;
             }
+        }
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            ApplyState();
         }
 
         private void EnsureLocalPlayerCached()

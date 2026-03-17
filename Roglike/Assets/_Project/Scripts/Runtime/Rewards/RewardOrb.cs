@@ -64,15 +64,16 @@ namespace Project.Rewards
 
             stats.ServerApplyReward(kind, value);
             _picked.Add(playerNi.netId);
-            TryDestroyIfAllPicked();
 
             int metaCurrency = GetMetaCurrencyReward(rarity);
+            stats.ServerAddRunEssence(metaCurrency);
             var conn = sender ?? playerNi.connectionToClient;
             if (conn != null)
             {
                 TargetConfirmPicked(conn);
-                TargetGrantMetaCurrency(conn, metaCurrency);
             }
+
+            TryDestroyIfAllPicked();
 
             Debug.Log(
                 $"[RewardOrb] Pick ok playerNetId={playerNi.netId} option={optionIndex} " +
@@ -83,17 +84,6 @@ namespace Project.Rewards
         private void TargetConfirmPicked(NetworkConnectionToClient target)
         {
             RewardUI.Instance?.ClientOnPickedConfirmed();
-        }
-
-        [TargetRpc]
-        private void TargetGrantMetaCurrency(NetworkConnectionToClient target, int amount)
-        {
-            if (amount <= 0)
-                return;
-
-            Project.Progression.MetaProgressionService.AddCurrency(amount);
-            Project.Progression.RunProgressTracker.AddRunEssence(amount);
-            RewardUI.Instance?.ClientOnMetaCurrencyGained(amount);
         }
 
         private static int Encode(Project.Player.RewardRarity r, RewardKind k, int value)

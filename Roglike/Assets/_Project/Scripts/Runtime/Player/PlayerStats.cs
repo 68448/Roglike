@@ -29,6 +29,7 @@ namespace Project.Player
         [Header("Meta Stats (Synced)")]
         [SyncVar] public int MetaMaxHpBonus;
         [SyncVar] public int MetaDamagePctBonus;
+        [SyncVar] public int RunEssenceEarned;
 
         public float DamageMultiplier => 1f + ((BonusDamagePct + MetaDamagePctBonus) / 100f);
         public float MoveSpeedMultiplier => 1f + ((BonusMoveSpeedPct + EquipmentMoveSpeedPctBonus) / 100f);
@@ -42,6 +43,12 @@ namespace Project.Player
             int hpBonus = Project.Progression.MetaProgressionService.GetMaxHpMetaBonus();
             int dmgBonus = Project.Progression.MetaProgressionService.GetDamageMetaBonusPct();
             CmdApplyMetaProgression(hpBonus, dmgBonus);
+        }
+
+        public override void OnStartServer()
+        {
+            base.OnStartServer();
+            RunEssenceEarned = 0;
         }
 
         [Command]
@@ -111,6 +118,15 @@ namespace Project.Player
             var health = GetComponent<Project.Gameplay.PlayerHealth>();
             if (health != null)
                 health.ServerRecalculateMaxHpFromStats(fillToFull: false);
+        }
+
+        [Server]
+        public void ServerAddRunEssence(int amount)
+        {
+            if (amount <= 0)
+                return;
+
+            RunEssenceEarned += amount;
         }
     }
 }
