@@ -16,6 +16,7 @@ namespace Project.Gameplay
         [SyncVar] public int MaxHP;
         [SerializeField] private int maxHP = 30;
         [SyncVar] public int BaseHP;
+        private bool _isDead;
 
         public override void OnStartServer()
         {
@@ -31,16 +32,22 @@ namespace Project.Gameplay
             {
                 CurrentHP = MaxHP;
             }
+
+            _isDead = false;
         }
 
         [Server]
         public void TakeDamage(int amount)
         {
+            if (_isDead || CurrentHP <= 0)
+                return;
+
             if (amount <= 0) return;
 
             CurrentHP -= amount;
             if (CurrentHP <= 0)
             {
+                _isDead = true;
                 CurrentHP = 0;
                 var controller = FindFirstObjectByType<Project.WorldGen.ChunkDungeonController>();
                 if (controller != null)
@@ -52,8 +59,10 @@ namespace Project.Gameplay
                 {
                     var dungeonCtrl = FindFirstObjectByType<Project.WorldGen.ChunkDungeonController>();
                     if (dungeonCtrl != null)
+                    {
                         dungeonCtrl.ServerNotifyBossDied(boss.SegmentIndex);
                         dungeonCtrl.ServerSpawnRewardOrb(boss.SegmentIndex, transform.position);
+                    }
                 }
                 NetworkServer.Destroy(gameObject);
             }
