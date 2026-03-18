@@ -385,6 +385,19 @@ namespace Project.WorldGen
                         spawnedAIs.Add(ai);
                     }
 
+                    var rangedAi = enemyObj.GetComponent<Project.Gameplay.EnemyRangedAI>();
+                    if (rangedAi != null)
+                    {
+                        rangedAi.ServerApplyScaling(stats.damage, stats.moveSpeed);
+                        rangedAi.IsAwake = false;
+                    }
+
+                    var supportAi = enemyObj.GetComponent<Project.Gameplay.EnemySupportAI>();
+                    if (supportAi != null)
+                    {
+                        supportAi.ServerApplyScaling(stats.damage, stats.moveSpeed);
+                        supportAi.IsAwake = false;
+                    }
 
                     NetworkServer.Spawn(enemyObj);
                 }
@@ -574,6 +587,10 @@ namespace Project.WorldGen
                 var ranged = eh.GetComponent<Project.Gameplay.EnemyRangedAI>();
                 if (ranged != null)
                     ranged.ServerWakeUp();  
+
+                var support = eh.GetComponent<Project.Gameplay.EnemySupportAI>();
+                if (support != null)
+                    support.ServerWakeUp();
             }
 
             ServerWakeBossIfInThisRoom(segmentIndex, roomId);

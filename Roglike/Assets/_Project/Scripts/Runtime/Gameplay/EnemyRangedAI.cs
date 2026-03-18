@@ -28,10 +28,16 @@ namespace Project.Gameplay
 
         private Rigidbody _rb;
         private float _shootTimer;
+        private float _supportDamageMultiplier = 1f;
+        private float _supportMoveSpeedMultiplier = 1f;
+        private float _supportBuffTimer;
+        private MaterialPropertyBlock _buffBlock;
+        private GameObject _supportBuffMarker;
 
         private void Awake()
         {
             _rb = GetComponent<Rigidbody>();
+            _buffBlock = new MaterialPropertyBlock();
         }
 
         public override void OnStartServer()
@@ -60,6 +66,8 @@ namespace Project.Gameplay
         {
             if (!NetworkServer.active) return;
             if (!IsAwake) return;
+
+            TickSupportBuffTimer();
 
             var target = FindClosestAlivePlayer();
             if (target == null) return;
@@ -122,7 +130,7 @@ namespace Project.Gameplay
             if (dir.sqrMagnitude < 0.001f) return;
 
             dir.Normalize();
-            float speed = (_moveSpeed > 0.01f) ? _moveSpeed : defaultMoveSpeed;
+            float speed = ((_moveSpeed > 0.01f) ? _moveSpeed : defaultMoveSpeed) * _supportMoveSpeedMultiplier;
 
             _rb.MovePosition(_rb.position + dir * speed * Time.fixedDeltaTime);
             _rb.MoveRotation(Quaternion.LookRotation(dir, Vector3.up));
@@ -135,7 +143,7 @@ namespace Project.Gameplay
             if (dir.sqrMagnitude < 0.001f) return;
 
             dir.Normalize();
-            float speed = (_moveSpeed > 0.01f) ? _moveSpeed : defaultMoveSpeed;
+            float speed = ((_moveSpeed > 0.01f) ? _moveSpeed : defaultMoveSpeed) * _supportMoveSpeedMultiplier;
 
             _rb.MovePosition(_rb.position + dir * speed * Time.fixedDeltaTime);
             _rb.MoveRotation(Quaternion.LookRotation(-dir, Vector3.up)); // смотрит на цель
@@ -166,9 +174,66 @@ namespace Project.Gameplay
 
             var p = go.GetComponent<Project.Projectiles.EnemyProjectile>();
             if (p != null)
-                p.Init(_damage, projectileSpeed);
+                p.Init(Mathf.Max(1, Mathf.RoundToInt(_damage * _supportDamageMultiplier)), projectileSpeed);
 
             NetworkServer.Spawn(go);
+        }
+
+        [Server]
+        public void ServerApplySupportBuff(float damageMultiplier, float moveSpeedMultiplier, float duration)
+        {
+            _supportDamageMultiplier = Mathf.Max(_supportDamageMultiplier, Mathf.Max(1f, damageMultiplier));
+            _supportMoveSpeedMultiplier = Mathf.Max(_supportMoveSpeedMultiplier, Mathf.Max(1f, moveSpeedMultiplier));
+            _supportBuffTimer = Mathf.Max(_supportBuffTimer, Mathf.Max(0f, duration));
+            RpcSetSupportBuffVisual(true);
+        }
+
+        [Server]
+        private void TickSupportBuffTimer()
+        {
+            if (_supportBuffTimer <= 0f)
+                return;
+
+            _supportBuffTimer -= Time.fixedDeltaTime;
+            if (_supportBuffTimer > 0f)
+                return;
+
+            _supportBuffTimer = 0f;
+            _supportDamageMultiplier = 1f;
+            _supportMoveSpeedMultiplier = 1f;
+            RpcSetSupportBuffVisual(false);
+        }
+
+        [ClientRpc]
+        private void RpcSetSupportBuffVisual(bool active)
+        {
+            if (active)
+            {
+                if (_supportBuffMarker == null)
+                {
+                    _supportBuffMarker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    _supportBuffMarker.name = "SupportBuffMarker_Runtime";
+                    Destroy(_supportBuffMarker.GetComponent<Collider>());
+                    _supportBuffMarker.transform.SetParent(transform, false);
+                    _supportBuffMarker.transform.localPosition = new Vector3(0f, 2.2f, 0f);
+                    _supportBuffMarker.transform.localScale = Vector3.one * 0.22f;
+
+                    var renderer = _supportBuffMarker.GetComponent<Renderer>();
+                    if (renderer != null)
+                    {
+                        renderer.GetPropertyBlock(_buffBlock);
+                        _buffBlock.SetColor("_Color", Color.green);
+                        _buffBlock.SetColor("_BaseColor", Color.green);
+                        renderer.SetPropertyBlock(_buffBlock);
+                    }
+                }
+
+                _supportBuffMarker.SetActive(true);
+            }
+            else if (_supportBuffMarker != null)
+            {
+                _supportBuffMarker.SetActive(false);
+            }
         }
     }
 }

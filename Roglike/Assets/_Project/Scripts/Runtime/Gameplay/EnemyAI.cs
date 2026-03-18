@@ -26,6 +26,10 @@ namespace Project.Gameplay
         public bool IsElite;
 
         private MaterialPropertyBlock _mpb;
+        private float _supportDamageMultiplier = 1f;
+        private float _supportMoveSpeedMultiplier = 1f;
+        private float _supportBuffTimer;
+        private GameObject _supportBuffMarker;
 
         // room activation
         [SyncVar] public bool IsAwake;
@@ -83,6 +87,8 @@ namespace Project.Gameplay
             if (!NetworkServer.active) return;
             if (!IsAwake) return;
 
+            TickSupportBuffTimer();
+
             var target = FindClosestAlivePlayer();
             if (target == null) return;
 
@@ -130,7 +136,7 @@ namespace Project.Gameplay
 
             dir.Normalize();
 
-            float speed = (_moveSpeed > 0.01f) ? _moveSpeed : defaultMoveSpeed;
+            float speed = ((_moveSpeed > 0.01f) ? _moveSpeed : defaultMoveSpeed) * _supportMoveSpeedMultiplier;
 
             Vector3 next = _rb.position + dir * speed * Time.fixedDeltaTime;
             _rb.MovePosition(next);
@@ -146,7 +152,7 @@ namespace Project.Gameplay
                 return;
             }
 
-            int dmg = (_damage > 0) ? _damage : defaultDamage;
+            int dmg = Mathf.Max(1, Mathf.RoundToInt(((_damage > 0) ? _damage : defaultDamage) * _supportDamageMultiplier));
 
             var hp = target.GetComponent<Project.Gameplay.PlayerHealth>();
             if (hp != null)
@@ -154,6 +160,31 @@ namespace Project.Gameplay
                 hp.TakeDamage(dmg, gameObject);
                 _attackTimer = attackCooldown;
             }
+        }
+
+        [Server]
+        public void ServerApplySupportBuff(float damageMultiplier, float moveSpeedMultiplier, float duration)
+        {
+            _supportDamageMultiplier = Mathf.Max(_supportDamageMultiplier, Mathf.Max(1f, damageMultiplier));
+            _supportMoveSpeedMultiplier = Mathf.Max(_supportMoveSpeedMultiplier, Mathf.Max(1f, moveSpeedMultiplier));
+            _supportBuffTimer = Mathf.Max(_supportBuffTimer, Mathf.Max(0f, duration));
+            RpcSetSupportBuffVisual(true);
+        }
+
+        [Server]
+        private void TickSupportBuffTimer()
+        {
+            if (_supportBuffTimer <= 0f)
+                return;
+
+            _supportBuffTimer -= Time.fixedDeltaTime;
+            if (_supportBuffTimer > 0f)
+                return;
+
+            _supportBuffTimer = 0f;
+            _supportDamageMultiplier = 1f;
+            _supportMoveSpeedMultiplier = 1f;
+            RpcSetSupportBuffVisual(false);
         }
 
         private void OnEliteChanged(bool oldValue, bool newValue)
@@ -213,6 +244,38 @@ namespace Project.Gameplay
             }
 
             r.SetPropertyBlock(_mpb);
+        }
+
+        [ClientRpc]
+        private void RpcSetSupportBuffVisual(bool active)
+        {
+            if (active)
+            {
+                if (_supportBuffMarker == null)
+                {
+                    _supportBuffMarker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    _supportBuffMarker.name = "SupportBuffMarker_Runtime";
+                    Destroy(_supportBuffMarker.GetComponent<Collider>());
+                    _supportBuffMarker.transform.SetParent(transform, false);
+                    _supportBuffMarker.transform.localPosition = new Vector3(0f, 2.2f, 0f);
+                    _supportBuffMarker.transform.localScale = Vector3.one * 0.22f;
+
+                    var renderer = _supportBuffMarker.GetComponent<Renderer>();
+                    if (renderer != null)
+                    {
+                        renderer.GetPropertyBlock(_mpb);
+                        _mpb.SetColor("_Color", Color.green);
+                        _mpb.SetColor("_BaseColor", Color.green);
+                        renderer.SetPropertyBlock(_mpb);
+                    }
+                }
+
+                _supportBuffMarker.SetActive(true);
+            }
+            else if (_supportBuffMarker != null)
+            {
+                _supportBuffMarker.SetActive(false);
+            }
         }
 
 

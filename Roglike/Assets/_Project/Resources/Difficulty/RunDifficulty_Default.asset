@@ -37,6 +37,13 @@ MonoBehaviour:
     hpMult: 0.85
     damageMult: 0.9
     speedMult: 0.95
+  - name: Enemy Support
+    prefab: {fileID: 3650949803389058101, guid: 5b671b4f68cfe2a469d319639e9ddbb9, type: 3}
+    minSegment: 1
+    weight: 6
+    hpMult: 0.8
+    damageMult: 0.7
+    speedMult: 0.95
   hpGrowthPerSegment: 0.12
   damageGrowthPerSegment: 0.08
   speedGrowthPerSegment: 0.02
