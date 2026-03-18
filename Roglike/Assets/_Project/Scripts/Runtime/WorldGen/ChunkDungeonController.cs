@@ -11,6 +11,7 @@ namespace Project.WorldGen
     {
         [Header("References")]
         [SerializeField] private SegmentGeneratorBase  generator;
+        [SerializeField] private BiomeCatalog biomeCatalog;
 
         [Header("Chunk Settings")]
         [SerializeField] private int keepSegmentsInMemory = 2; // текущий + следующий
@@ -68,6 +69,7 @@ namespace Project.WorldGen
         private readonly System.Collections.Generic.Dictionary<int, int> _exitRoomIdBySegment = new();
 
         private readonly System.Collections.Generic.HashSet<int> _generatedSegments = new();
+        private BiomeType _lastLoggedBiome = (BiomeType)(-1);
 
         private readonly System.Collections.Generic.HashSet<int> _bossSpawnedSegments = new();
 
@@ -78,6 +80,9 @@ namespace Project.WorldGen
         {
             if (generator == null)
                 generator = FindFirstObjectByType<DungeonGeneratorStub>();
+
+            if (biomeCatalog == null)
+                biomeCatalog = GetComponent<BiomeCatalog>();
 
             if (enemyPrefab == null)
                 Debug.LogWarning("[ChunkDungeonController] enemyPrefab is not assigned!");
@@ -116,6 +121,8 @@ namespace Project.WorldGen
                 EnsureSegmentGenerated(_session.SegmentIndex);
                 EnsureSegmentGenerated(_session.SegmentIndex + 1);
                 CleanupOldSegments();
+                ApplyCurrentSegmentBiomeVisuals();
+                LogBiomeTransitionIfNeeded(_session.SegmentIndex);
 
                 Debug.Log($"[ChunkDungeonController] Detected SegmentIndex change -> {_session.SegmentIndex}");
             }
@@ -135,16 +142,18 @@ namespace Project.WorldGen
 
         private void GenerateSegmentInternal(int segmentIndex, int segmentSeed)
         {
-
+            BiomeConfig biomeConfig = GetBiomeConfigForSegment(segmentIndex);
             var segmentRoot = new GameObject($"Segment_{segmentIndex}");
             float recommended = (generator != null) ? generator.GetRecommendedSegmentOffset() : segmentOffset;
             float offset = Mathf.Max(segmentOffset, recommended);
 
             segmentRoot.transform.position = new Vector3((segmentIndex - 1) * offset, 0, 0);
+            var biomeState = segmentRoot.AddComponent<SegmentBiomeState>();
+            biomeState.Init(segmentIndex, biomeConfig);
 
             // Важно: генератор сейчас создаёт комнаты под свой dungeonRoot.
             // Мы временно создадим генерацию в segmentRoot:
-            generator.GenerateInto(segmentSeed, segmentIndex, segmentRoot.transform);
+            generator.GenerateInto(segmentSeed, segmentIndex, segmentRoot.transform, biomeConfig);
             // === Read markers from generator ===
             var markers = segmentRoot.GetComponentInChildren<Project.WorldGen.SegmentMarkers>();
             if (markers == null)
@@ -171,7 +180,7 @@ namespace Project.WorldGen
                 ServerSpawnEnemiesForSegment(segmentIndex, segmentRoot.transform);
             }
 
-            Debug.Log($"[ChunkDungeonController] Generated Segment={segmentIndex} Seed={segmentSeed}");
+            Debug.Log($"[ChunkDungeonController] Generated Segment={segmentIndex} Seed={segmentSeed} Biome={biomeState.DisplayName}");
         }
 
         private void EnsureSegmentGenerated(int segmentIndex)
@@ -654,10 +663,49 @@ namespace Project.WorldGen
             EnsureSegmentGenerated(_session.SegmentIndex);
             EnsureSegmentGenerated(_session.SegmentIndex + 1);
             CleanupOldSegments();
+            ApplyCurrentSegmentBiomeVisuals();
+            LogBiomeTransitionIfNeeded(_session.SegmentIndex);
 
             _lastKnownSegmentIndex = _session.SegmentIndex;
 
             Debug.Log($"[ChunkDungeonController] Init ready. Seed={_session.Seed} SegmentIndex={_session.SegmentIndex}");
+        }
+
+        private BiomeConfig GetBiomeConfigForSegment(int segmentIndex)
+        {
+            BiomeType biomeType = BiomeService.GetBiomeForSegment(segmentIndex);
+
+            if (biomeCatalog != null)
+                return biomeCatalog.GetConfig(biomeType);
+
+            return BiomeCatalog.CreateFallbackConfig(biomeType);
+        }
+
+        private void ApplyCurrentSegmentBiomeVisuals()
+        {
+            if (_session == null)
+                return;
+
+            var currentSegment = GameObject.Find($"Segment_{_session.SegmentIndex}");
+            if (currentSegment == null)
+                return;
+
+            var biomeState = currentSegment.GetComponent<SegmentBiomeState>();
+            biomeState?.ApplySceneVisuals();
+        }
+
+        private void LogBiomeTransitionIfNeeded(int segmentIndex)
+        {
+            BiomeType biomeType = BiomeService.GetBiomeForSegment(segmentIndex);
+            if (_lastLoggedBiome == biomeType)
+                return;
+
+            _lastLoggedBiome = biomeType;
+            var biomeConfig = GetBiomeConfigForSegment(segmentIndex);
+            string biomeName = biomeConfig != null ? biomeConfig.GetResolvedDisplayName() : BiomeService.GetDisplayName(biomeType);
+            int startSegment = BiomeService.GetBiomeStartSegment(biomeType);
+            int endSegment = BiomeService.GetBiomeEndSegment(biomeType);
+            Debug.Log($"[Biome] Segment {segmentIndex} -> {biomeName} ({startSegment}-{endSegment})");
         }
 
         // ===== Coop scaling helpers =====
@@ -710,7 +758,8 @@ namespace Project.WorldGen
         [Server]
         private void ServerSpawnBossForExitRoom(int segmentIndex, int exitRoomId, Vector3 portalPos)
         {
-            if (bossPrefab == null)
+            GameObject resolvedBossPrefab = ResolveBossPrefabForSegment(segmentIndex);
+            if (resolvedBossPrefab == null)
             {
                 Debug.LogWarning("[ChunkDungeonController] bossPrefab is null, boss skipped.");
                 return;
@@ -719,7 +768,7 @@ namespace Project.WorldGen
             // Ставим босса чуть в стороне от портала
             Vector3 spawnPos = portalPos + new Vector3(0f, 0f, -4f);
 
-            var bossObj = Instantiate(bossPrefab, spawnPos, Quaternion.identity);
+            var bossObj = Instantiate(resolvedBossPrefab, spawnPos, Quaternion.identity);
 
             // Помечаем как босса
             var marker = bossObj.GetComponent<Project.Boss.BossMarker>();
@@ -770,6 +819,15 @@ namespace Project.WorldGen
             Debug.Log($"[ChunkDungeonController] Boss spawned for Segment={segmentIndex} hp={stats.hp}");
         }
 
+        private GameObject ResolveBossPrefabForSegment(int segmentIndex)
+        {
+            var biomeConfig = GetBiomeConfigForSegment(segmentIndex);
+            if (biomeConfig != null && biomeConfig.bossPrefab != null)
+                return biomeConfig.bossPrefab;
+
+            return bossPrefab;
+        }
+
         [Server]
         public void ServerNotifyBossDied(int segmentIndex)
         {
@@ -818,8 +876,19 @@ namespace Project.WorldGen
         [Server]
         public void ServerAdvanceToNextSegmentAndTeleportParty(int targetSegment)
         {
+            if (_session == null)
+                _session = FindFirstObjectByType<Project.Networking.RunSessionNetworkState>();
+
+            if (_session != null && _session.SegmentIndex != targetSegment)
+            {
+                _session.SegmentIndex = targetSegment;
+                Debug.Log($"[ChunkDungeonController] Session SegmentIndex updated to {targetSegment}");
+            }
+
             // 1) гарантируем генерацию
             EnsureSegmentGenerated(targetSegment); // если у тебя другой метод — замени
+            EnsureSegmentGenerated(targetSegment + 1);
+            CleanupOldSegments();
 
             // 2) safe точка должна быть записана из SegmentMarkers
             if (!_safeSpawnBySegment.TryGetValue(targetSegment, out var safePos))

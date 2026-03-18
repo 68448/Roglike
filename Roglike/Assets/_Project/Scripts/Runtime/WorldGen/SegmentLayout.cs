@@ -24,6 +24,8 @@ namespace Project.WorldGen
         public int ExitRoomId = -1;
         public int SegmentIndex;
         public int GeneratedSeed;
+        public BiomeType BiomeType = BiomeType.Shire;
+        public string BiomeDisplayName = "Shire";
         public List<RoomData> Rooms = new List<RoomData>();
     }
 }

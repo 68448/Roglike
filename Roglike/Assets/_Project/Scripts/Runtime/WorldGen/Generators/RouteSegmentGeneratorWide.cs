@@ -37,9 +37,15 @@ namespace Project.WorldGen.Generators
         [SerializeField] private Material trailMaterial;
         [SerializeField] private Material decorMaterial;
 
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+
+        private Project.WorldGen.BiomeConfig _activeBiomeConfig;
+
         // ВАЖНО: Сигнатура как у твоего текущего генератора, чтобы ChunkDungeonController не менять
-        public override void GenerateInto(int seed, int segmentIndex, Transform segmentRoot)
+        public override void GenerateInto(int seed, int segmentIndex, Transform segmentRoot, Project.WorldGen.BiomeConfig biomeConfig)
         {
+            _activeBiomeConfig = biomeConfig;
             var rng = new System.Random(seed);
 
             // контейнеры
@@ -60,6 +66,8 @@ namespace Project.WorldGen.Generators
 
             layout.SegmentIndex = segmentIndex;
             layout.GeneratedSeed = seed;
+            layout.BiomeType = biomeConfig != null ? biomeConfig.biomeType : Project.WorldGen.BiomeService.GetBiomeForSegment(segmentIndex);
+            layout.BiomeDisplayName = biomeConfig != null ? biomeConfig.GetResolvedDisplayName() : Project.WorldGen.BiomeService.GetDisplayName(layout.BiomeType);
             layout.SafeRoomId = 0;          // у нас safe — всегда первый узел
             layout.ExitRoomId = -1;         // выставим позже
             layout.Rooms.Clear();  
@@ -300,7 +308,7 @@ namespace Project.WorldGen.Generators
             col.center = new Vector3(0f, trailThickness * 0.5f, 0f);
 
             var r = locGO.GetComponent<Renderer>();
-            if (r != null && groundMaterial != null) r.sharedMaterial = groundMaterial;
+            ApplySurfaceStyle(r, ResolveGroundMaterial(), ResolveGroundTint());
 
             // RoomTrigger (активация врагов "при входе в локацию")
             var triggerGO = new GameObject($"RoomTrigger_{segmentIndex}_{n.index}");
@@ -342,7 +350,7 @@ namespace Project.WorldGen.Generators
                 rock.transform.localScale = new Vector3(1.6f, 1.2f, 1.6f);
 
                 var rr = rock.GetComponent<Renderer>();
-                if (rr != null && decorMaterial != null) rr.sharedMaterial = decorMaterial;
+                ApplySurfaceStyle(rr, ResolveDecorMaterial(), ResolveDecorTint());
             }
         }
 
@@ -387,7 +395,7 @@ namespace Project.WorldGen.Generators
                 col.center = new Vector3(0f, trailThickness * 0.5f + 0.05f, 0f);
 
                 var r = tile.GetComponent<Renderer>();
-                if (r != null && trailMaterial != null) r.sharedMaterial = trailMaterial;
+                ApplySurfaceStyle(r, ResolveTrailMaterial(), ResolveTrailTint());
 
                 // декор — НЕ по центру дороги, а по бокам
                 int decorCount = rng.Next(decorPerTrailTileMin, decorPerTrailTileMax + 1);
@@ -404,9 +412,60 @@ namespace Project.WorldGen.Generators
                     deco.transform.localScale = new Vector3(0.7f, 0.6f, 0.7f);
 
                     var dr = deco.GetComponent<Renderer>();
-                    if (dr != null && decorMaterial != null) dr.sharedMaterial = decorMaterial;
+                    ApplySurfaceStyle(dr, ResolveDecorMaterial(), ResolveDecorTint());
                 }
             }
+        }
+
+        private Material ResolveGroundMaterial()
+        {
+            return _activeBiomeConfig != null && _activeBiomeConfig.groundMaterial != null
+                ? _activeBiomeConfig.groundMaterial
+                : groundMaterial;
+        }
+
+        private Material ResolveTrailMaterial()
+        {
+            return _activeBiomeConfig != null && _activeBiomeConfig.trailMaterial != null
+                ? _activeBiomeConfig.trailMaterial
+                : trailMaterial;
+        }
+
+        private Material ResolveDecorMaterial()
+        {
+            return _activeBiomeConfig != null && _activeBiomeConfig.decorMaterial != null
+                ? _activeBiomeConfig.decorMaterial
+                : decorMaterial;
+        }
+
+        private Color ResolveGroundTint()
+        {
+            return _activeBiomeConfig != null ? _activeBiomeConfig.groundTint : Color.white;
+        }
+
+        private Color ResolveTrailTint()
+        {
+            return _activeBiomeConfig != null ? _activeBiomeConfig.trailTint : Color.white;
+        }
+
+        private Color ResolveDecorTint()
+        {
+            return _activeBiomeConfig != null ? _activeBiomeConfig.decorTint : Color.white;
+        }
+
+        private void ApplySurfaceStyle(Renderer renderer, Material materialOverride, Color tint)
+        {
+            if (renderer == null)
+                return;
+
+            if (materialOverride != null)
+                renderer.sharedMaterial = materialOverride;
+
+            var propertyBlock = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(propertyBlock);
+            propertyBlock.SetColor(BaseColorId, tint);
+            propertyBlock.SetColor(ColorId, tint);
+            renderer.SetPropertyBlock(propertyBlock);
         }
 
         // ------------------ helpers ------------------

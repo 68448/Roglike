@@ -7,7 +7,7 @@ namespace Project.WorldGen.Generators
     public abstract class SegmentGeneratorBase : MonoBehaviour
     {
         // Генерация сегмента в segmentRoot (в ЛОКАЛЬНЫХ координатах segmentRoot).
-        public abstract void GenerateInto(int seed, int segmentIndex, Transform segmentRoot);
+        public abstract void GenerateInto(int seed, int segmentIndex, Transform segmentRoot, Project.WorldGen.BiomeConfig biomeConfig);
 
         // Рекомендуемое смещение между сегментами по X (чтобы сегменты не пересекались).
         // По умолчанию можно вернуть 0, а контроллер возьмёт max(segmentOffset, recommended).

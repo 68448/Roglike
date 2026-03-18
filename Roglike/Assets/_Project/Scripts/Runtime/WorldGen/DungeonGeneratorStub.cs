@@ -55,11 +55,11 @@ namespace Project.WorldGen
         // Старый метод оставляем
         public void Generate(int seed)
         {
-            GenerateInto(seed, segmentIndex: 1, parent: _dungeonRoot);
+            GenerateInto(seed, segmentIndex: 1, parent: _dungeonRoot, biomeConfig: null);
         }
 
         // Новый основной метод
-        public override void GenerateInto(int seed, int segmentIndex, Transform parent)
+        public override void GenerateInto(int seed, int segmentIndex, Transform parent, Project.WorldGen.BiomeConfig biomeConfig)
         {
 
             // === create markers container ===
@@ -76,6 +76,8 @@ namespace Project.WorldGen
             if (layout == null) layout = _dungeonRoot.gameObject.AddComponent<SegmentLayout>();
             layout.GeneratedSeed = seed;
             layout.SegmentIndex = segmentIndex;
+            layout.BiomeType = biomeConfig != null ? biomeConfig.biomeType : Project.WorldGen.BiomeService.GetBiomeForSegment(segmentIndex);
+            layout.BiomeDisplayName = biomeConfig != null ? biomeConfig.GetResolvedDisplayName() : Project.WorldGen.BiomeService.GetDisplayName(layout.BiomeType);
             layout.Rooms.Clear();
 
             var rng = new Random(seed);

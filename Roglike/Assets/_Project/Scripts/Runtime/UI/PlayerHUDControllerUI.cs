@@ -9,6 +9,7 @@ namespace Project.UI
         [Header("HP UI")]
         [SerializeField] private UnityEngine.UI.Slider hpSlider;
         [SerializeField] private Text hpText;      // HP_Text
+        [SerializeField] private Text biomeText;
 
         [Header("Skill Slots (future)")]
         [SerializeField] private Button[] skillButtons; // 6 кнопок
@@ -19,6 +20,7 @@ namespace Project.UI
         private float _t;
         private Project.Gameplay.PlayerHealth _hp;
         private Project.Player.PlayerStats _stats;
+        private Project.Networking.RunSessionNetworkState _session;
 
         private void Awake()
         {
@@ -56,6 +58,7 @@ namespace Project.UI
 
             EnsureLocalPlayerRefs();
             RefreshHP();
+            RefreshBiomeInfo();
         }
 
         private void EnsureLocalPlayerRefs()
@@ -88,6 +91,32 @@ namespace Project.UI
             if (hpText != null) hpText.text = $"HP {cur}/{max}";
             if (hpSlider != null)
                 hpSlider.value = Mathf.Clamp01(cur / (float)max);
+        }
+
+        private void EnsureSessionRef()
+        {
+            if (_session != null)
+                return;
+
+            _session = FindFirstObjectByType<Project.Networking.RunSessionNetworkState>();
+        }
+
+        private void RefreshBiomeInfo()
+        {
+            if (biomeText == null)
+                return;
+
+            EnsureSessionRef();
+            if (_session == null)
+            {
+                biomeText.text = "Biome -";
+                return;
+            }
+
+            int segmentIndex = Mathf.Max(1, _session.SegmentIndex);
+            var biomeType = Project.WorldGen.BiomeService.GetBiomeForSegment(segmentIndex);
+            string biomeName = Project.WorldGen.BiomeService.GetDisplayName(biomeType);
+            biomeText.text = $"Segment {segmentIndex} - {biomeName}";
         }
 
         private void HandleSkillHotkeys()
