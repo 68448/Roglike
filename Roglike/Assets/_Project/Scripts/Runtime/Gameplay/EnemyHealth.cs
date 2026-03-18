@@ -72,6 +72,10 @@ namespace Project.Gameplay
             if (_isDead || CurrentHP <= 0)
                 return;
 
+            var tankAi = GetComponent<Project.Gameplay.EnemyTankAI>();
+            if (tankAi != null)
+                amount = tankAi.ModifyIncomingDamage(amount);
+
             if (amount <= 0) return;
 
             CurrentHP -= amount;
