@@ -332,7 +332,7 @@ namespace Project.WorldGen
 
                     // 2) Scaling
 
-                    var pickedPrefab = Project.Difficulty.DifficultyService.PickEnemyPrefab(segmentIndex, _difficulty, rng, out var entry);
+                    var pickedPrefab = ResolveEnemyPrefabForSegment(segmentIndex, rng, out var entry);
 
                     if (pickedPrefab == null)
                     {
@@ -826,6 +826,32 @@ namespace Project.WorldGen
                 return biomeConfig.bossPrefab;
 
             return bossPrefab;
+        }
+
+        private GameObject ResolveEnemyPrefabForSegment(int segmentIndex, System.Random rng, out Project.Difficulty.EnemySpawnEntry entry)
+        {
+            entry = null;
+
+            var biomeConfig = GetBiomeConfigForSegment(segmentIndex);
+            if (biomeConfig != null && biomeConfig.enemyPrefabs != null && biomeConfig.enemyPrefabs.Length > 0)
+            {
+                var validPrefabs = new List<GameObject>();
+                for (int i = 0; i < biomeConfig.enemyPrefabs.Length; i++)
+                {
+                    var prefab = biomeConfig.enemyPrefabs[i];
+                    if (prefab != null)
+                        validPrefabs.Add(prefab);
+                }
+
+                if (validPrefabs.Count > 0)
+                {
+                    var pickedPrefab = validPrefabs[rng.Next(0, validPrefabs.Count)];
+                    Project.Difficulty.DifficultyService.TryGetSpawnEntryForPrefab(segmentIndex, _difficulty, pickedPrefab, out entry);
+                    return pickedPrefab;
+                }
+            }
+
+            return Project.Difficulty.DifficultyService.PickEnemyPrefab(segmentIndex, _difficulty, rng, out entry);
         }
 
         [Server]

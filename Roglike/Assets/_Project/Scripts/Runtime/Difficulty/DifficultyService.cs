@@ -138,6 +138,28 @@ namespace Project.Difficulty
                 isElite = elite
             };
         }
+
+        public static bool TryGetSpawnEntryForPrefab(int segmentIndex, RunDifficultySettings s, GameObject prefab, out EnemySpawnEntry picked)
+        {
+            picked = null;
+
+            if (prefab == null || s == null || s.enemySpawnTable == null || s.enemySpawnTable.Length == 0)
+                return false;
+
+            for (int i = 0; i < s.enemySpawnTable.Length; i++)
+            {
+                var entry = s.enemySpawnTable[i];
+                if (entry == null) continue;
+                if (entry.prefab == null) continue;
+                if (entry.prefab != prefab) continue;
+                if (segmentIndex < entry.minSegment) continue;
+
+                picked = entry;
+                return true;
+            }
+
+            return false;
+        }
         
     }
 }
