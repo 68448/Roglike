@@ -406,6 +406,13 @@ namespace Project.WorldGen
                         tankAi.IsAwake = false;
                     }
 
+                    var summonerAi = enemyObj.GetComponent<Project.Gameplay.EnemySummonerAI>();
+                    if (summonerAi != null)
+                    {
+                        summonerAi.ServerApplyScaling(stats.damage, stats.moveSpeed);
+                        summonerAi.IsAwake = false;
+                    }
+
                     NetworkServer.Spawn(enemyObj);
                 }
 
@@ -602,6 +609,10 @@ namespace Project.WorldGen
                 var tank = eh.GetComponent<Project.Gameplay.EnemyTankAI>();
                 if (tank != null)
                     tank.ServerWakeUp();
+
+                var summoner = eh.GetComponent<Project.Gameplay.EnemySummonerAI>();
+                if (summoner != null)
+                    summoner.ServerWakeUp();
             }
 
             ServerWakeBossIfInThisRoom(segmentIndex, roomId);

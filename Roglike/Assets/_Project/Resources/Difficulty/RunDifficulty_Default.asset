@@ -51,6 +51,20 @@ MonoBehaviour:
     hpMult: 1.8
     damageMult: 1.1
     speedMult: 0.75
+  - name: Enemy Summoner
+    prefab: {fileID: 3650949803389058101, guid: 581f160c25301b44d8f1d15b4cadc866, type: 3}
+    minSegment: 1
+    weight: 4
+    hpMult: 0.9
+    damageMult: 0.8
+    speedMult: 0.95
+  - name: 'Enemy Minion '
+    prefab: {fileID: 3650949803389058101, guid: 9561dc24d0e5693458bab3218defcbee, type: 3}
+    minSegment: 1
+    weight: 4
+    hpMult: 0.7
+    damageMult: 0.6
+    speedMult: 0.95
   hpGrowthPerSegment: 0.12
   damageGrowthPerSegment: 0.08
   speedGrowthPerSegment: 0.02
