@@ -79,7 +79,7 @@ namespace Project.WorldGen
         private void Awake()
         {
             if (generator == null)
-                generator = FindFirstObjectByType<DungeonGeneratorStub>();
+                generator = FindFirstObjectByType<SegmentGeneratorBase>();
 
             if (biomeCatalog == null)
                 biomeCatalog = GetComponent<BiomeCatalog>();
@@ -320,14 +320,12 @@ namespace Project.WorldGen
                 if (!_roomEnemies.ContainsKey(key))
                     _roomEnemies[key] = new List<Project.Gameplay.EnemyAI>();
 
+                var roomSpawnPoints = new List<Vector3>(count);
 
                 for (int i = 0; i < count; i++)
                 {
-                    Vector3 pos = room.Center + new Vector3(
-                        UnityEngine.Random.Range(-room.Size.x * 0.35f, room.Size.x * 0.35f),
-                        1f,
-                        UnityEngine.Random.Range(-room.Size.z * 0.35f, room.Size.z * 0.35f)
-                    );
+                    Vector3 pos = FindSpreadSpawnPosition(room, roomSpawnPoints);
+                    roomSpawnPoints.Add(pos);
 
 
                     // 2) Scaling
@@ -473,6 +471,40 @@ namespace Project.WorldGen
 
             _aliveEnemies[segmentIndex] = total;
             Debug.Log($"[ChunkDungeonController] Spawned enemies total={total} for Segment={segmentIndex} (per room)");
+        }
+
+        private Vector3 FindSpreadSpawnPosition(Project.WorldGen.RoomData room, List<Vector3> existingPoints)
+        {
+            Vector3 best = room.Center + Vector3.up * 1f;
+            float bestScore = float.MinValue;
+
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                Vector3 candidate = room.Center + new Vector3(
+                    UnityEngine.Random.Range(-room.Size.x * 0.42f, room.Size.x * 0.42f),
+                    1f,
+                    UnityEngine.Random.Range(-room.Size.z * 0.42f, room.Size.z * 0.42f)
+                );
+
+                float nearest = float.MaxValue;
+                for (int i = 0; i < existingPoints.Count; i++)
+                {
+                    float d = Vector3.SqrMagnitude(candidate - existingPoints[i]);
+                    if (d < nearest)
+                        nearest = d;
+                }
+
+                if (existingPoints.Count == 0)
+                    nearest = Vector3.SqrMagnitude(candidate - room.Center);
+
+                if (nearest > bestScore)
+                {
+                    bestScore = nearest;
+                    best = candidate;
+                }
+            }
+
+            return best;
         }
 
 
@@ -663,18 +695,44 @@ namespace Project.WorldGen
             int safeId = layout.SafeRoomId;
             safeId = Mathf.Clamp(safeId, 0, layout.Rooms.Count - 1);
 
-            Vector3 safeCenter = layout.Rooms[safeId].Center;
+            Vector3 safeCenter;
+            if (_safeSpawnBySegment.TryGetValue(segmentIndex, out var recordedSafeSpawn))
+            {
+                safeCenter = recordedSafeSpawn;
+            }
+            else
+            {
+                safeCenter = layout.Rooms[safeId].Center;
+                Debug.LogWarning($"[ChunkDungeonController] SafeSpawn not recorded for seg={segmentIndex}, fallback to room center.");
+            }
 
             // Разводим игроков чуть-чуть, чтобы не стояли друг в друге
             var players = FindObjectsByType<Project.Gameplay.PlayerHealth>(FindObjectsSortMode.None);
 
             for (int i = 0; i < players.Length; i++)
             {
-                var pc = players[i].GetComponent<Project.Player.PlayerController>();
-                if (pc == null) continue;
-
                 Vector3 offset = new Vector3((i % 2) * 1.5f, 0f, (i / 2) * 1.5f);
-                pc.ServerTeleport(safeCenter + offset + Vector3.up * 1.2f);
+                Vector3 finalPos = safeCenter + offset + Vector3.up * 1.2f;
+
+                var identity = players[i].GetComponent<NetworkIdentity>();
+                if (identity != null)
+                {
+                    identity.transform.position = finalPos;
+
+                    var rb = identity.GetComponent<Rigidbody>();
+                    if (rb != null)
+                        rb.linearVelocity = Vector3.zero;
+
+                    var tele = identity.GetComponent<Project.Networking.PlayerTeleportReceiver>();
+                    if (tele != null && identity.connectionToClient != null)
+                    {
+                        tele.TargetForceTeleport(identity.connectionToClient, finalPos);
+                    }
+                }
+
+                var pc = players[i].GetComponent<Project.Player.PlayerController>();
+                if (pc != null)
+                    pc.ServerTeleport(finalPos);
             }
 
             Debug.Log($"[ChunkDungeonController] Teleported players to SafeRoom in Segment_{segmentIndex}");
@@ -729,7 +787,43 @@ namespace Project.WorldGen
 
             _lastKnownSegmentIndex = _session.SegmentIndex;
 
+            if (NetworkServer.active)
+                StartCoroutine(ServerEnsurePlayersAtSafeSpawn(_session.SegmentIndex));
+
             Debug.Log($"[ChunkDungeonController] Init ready. Seed={_session.Seed} SegmentIndex={_session.SegmentIndex}");
+        }
+
+        private System.Collections.IEnumerator ServerEnsurePlayersAtSafeSpawn(int segmentIndex)
+        {
+            if (!NetworkServer.active)
+                yield break;
+
+            float timeout = 5f;
+            while (timeout > 0f)
+            {
+                timeout -= Time.deltaTime;
+
+                bool hasPlayers = false;
+                foreach (var kv in NetworkServer.connections)
+                {
+                    if (kv.Value != null && kv.Value.identity != null)
+                    {
+                        hasPlayers = true;
+                        break;
+                    }
+                }
+
+                if (hasPlayers && _safeSpawnBySegment.ContainsKey(segmentIndex))
+                {
+                    yield return null;
+                    ServerTeleportPlayersToSafeRoom(segmentIndex);
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            Debug.LogWarning($"[ChunkDungeonController] Timed out waiting to place players at SafeSpawn for seg={segmentIndex}.");
         }
 
         private BiomeConfig GetBiomeConfigForSegment(int segmentIndex)
