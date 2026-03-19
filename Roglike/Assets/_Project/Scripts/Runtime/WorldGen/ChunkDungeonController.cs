@@ -413,6 +413,13 @@ namespace Project.WorldGen
                         summonerAi.IsAwake = false;
                     }
 
+                    var areaControlAi = enemyObj.GetComponent<Project.Gameplay.EnemyAreaControlAI>();
+                    if (areaControlAi != null)
+                    {
+                        areaControlAi.ServerApplyScaling(stats.damage, stats.moveSpeed);
+                        areaControlAi.IsAwake = false;
+                    }
+
                     NetworkServer.Spawn(enemyObj);
                 }
 
@@ -613,6 +620,10 @@ namespace Project.WorldGen
                 var summoner = eh.GetComponent<Project.Gameplay.EnemySummonerAI>();
                 if (summoner != null)
                     summoner.ServerWakeUp();
+
+                var areaControl = eh.GetComponent<Project.Gameplay.EnemyAreaControlAI>();
+                if (areaControl != null)
+                    areaControl.ServerWakeUp();
             }
 
             ServerWakeBossIfInThisRoom(segmentIndex, roomId);
