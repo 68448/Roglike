@@ -420,6 +420,13 @@ namespace Project.WorldGen
                         areaControlAi.IsAwake = false;
                     }
 
+                    var assassinAi = enemyObj.GetComponent<Project.Gameplay.EnemyAssassinAI>();
+                    if (assassinAi != null)
+                    {
+                        assassinAi.ServerApplyScaling(stats.damage, stats.moveSpeed);
+                        assassinAi.IsAwake = false;
+                    }
+
                     NetworkServer.Spawn(enemyObj);
                 }
 
@@ -624,6 +631,10 @@ namespace Project.WorldGen
                 var areaControl = eh.GetComponent<Project.Gameplay.EnemyAreaControlAI>();
                 if (areaControl != null)
                     areaControl.ServerWakeUp();
+
+                var assassin = eh.GetComponent<Project.Gameplay.EnemyAssassinAI>();
+                if (assassin != null)
+                    assassin.ServerWakeUp();
             }
 
             ServerWakeBossIfInThisRoom(segmentIndex, roomId);

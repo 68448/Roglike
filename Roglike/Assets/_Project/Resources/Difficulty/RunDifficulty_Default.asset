@@ -70,6 +70,13 @@ MonoBehaviour:
     minSegment: 1
     weight: 4
     hpMult: 0.95
+    damageMult: 0.85
+    speedMult: 0.95
+  - name: Enemy Area Control
+    prefab: {fileID: 3650949803389058101, guid: ec30566f575b23d4f8d86058dbbf73d9, type: 3}
+    minSegment: 1
+    weight: 4
+    hpMult: 0.95
     damageMult: 85
     speedMult: 0.95
   hpGrowthPerSegment: 0.12
