@@ -7,6 +7,8 @@ namespace Project.Gameplay
     [RequireComponent(typeof(EnemyHealth))]
     public sealed class EnemySupportAI : NetworkBehaviour
     {
+        private static readonly Color CastIndicatorColor = new(0.35f, 1f, 0.45f, 1f);
+
         [Header("Defaults")]
         [SerializeField] private int defaultDamage = 5;
         [SerializeField] private float defaultMoveSpeed = 2.8f;
@@ -14,6 +16,8 @@ namespace Project.Gameplay
         [Header("Support")]
         [SerializeField] private float buffRadius = 7f;
         [SerializeField] private float buffCooldown = 4f;
+        [SerializeField] private float buffWindup = 0.8f;
+        [SerializeField] private float buffRecovery = 0.35f;
         [SerializeField] private float buffDuration = 3.5f;
         [SerializeField] private float damageBuffMultiplier = 1.25f;
         [SerializeField] private float moveSpeedBuffMultiplier = 1.15f;
@@ -24,16 +28,25 @@ namespace Project.Gameplay
         [SerializeField] private float contactAttackCooldown = 1.4f;
 
         [SyncVar] public bool IsAwake;
+        [SyncVar] private bool _isCastingBuff;
         [SyncVar] private int _damage;
         [SyncVar] private float _moveSpeed;
 
         private Rigidbody _rb;
         private float _buffTimer;
+        private float _buffWindupTimer;
+        private float _buffRecoveryTimer;
         private float _contactAttackTimer;
+        private GameObject _castIndicator;
+        private MaterialPropertyBlock _castIndicatorBlock;
+
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
 
         private void Awake()
         {
             _rb = GetComponent<Rigidbody>();
+            _castIndicatorBlock = new MaterialPropertyBlock();
         }
 
         public override void OnStartServer()
@@ -58,6 +71,11 @@ namespace Project.Gameplay
             IsAwake = true;
         }
 
+        private void Update()
+        {
+            UpdateCastIndicator();
+        }
+
         private void FixedUpdate()
         {
             if (!NetworkServer.active) return;
@@ -68,6 +86,32 @@ namespace Project.Gameplay
 
             _buffTimer -= Time.fixedDeltaTime;
             _contactAttackTimer -= Time.fixedDeltaTime;
+
+            if (_buffRecoveryTimer > 0f)
+            {
+                _buffRecoveryTimer -= Time.fixedDeltaTime;
+                if (targetPlayer != null)
+                    LookAt(targetPlayer.position);
+                return;
+            }
+
+            if (_isCastingBuff)
+            {
+                _buffWindupTimer -= Time.fixedDeltaTime;
+                if (targetPlayer != null)
+                    LookAt(targetPlayer.position);
+
+                if (_buffWindupTimer <= 0f)
+                {
+                    int buffed = ApplyBuffToNearbyAllies();
+                    _isCastingBuff = false;
+                    _buffRecoveryTimer = buffRecovery;
+                    if (buffed > 0)
+                        _buffTimer = buffCooldown;
+                }
+
+                return;
+            }
 
             if (targetPlayer != null)
             {
@@ -88,10 +132,16 @@ namespace Project.Gameplay
 
             if (_buffTimer <= 0f)
             {
-                int buffed = ApplyBuffToNearbyAllies();
-                if (buffed > 0)
-                    _buffTimer = buffCooldown;
+                if (HasBuffableAlliesInRange())
+                    StartBuffCast();
             }
+        }
+
+        [Server]
+        private void StartBuffCast()
+        {
+            _isCastingBuff = true;
+            _buffWindupTimer = Mathf.Max(0.1f, buffWindup);
         }
 
         private Transform FindClosestAlivePlayer()
@@ -183,6 +233,28 @@ namespace Project.Gameplay
         }
 
         [Server]
+        private bool HasBuffableAlliesInRange()
+        {
+            var meleeAllies = FindObjectsByType<Project.Gameplay.EnemyAI>(FindObjectsSortMode.None);
+            for (int i = 0; i < meleeAllies.Length; i++)
+            {
+                var ally = meleeAllies[i];
+                if (ally == null || ally.gameObject == gameObject || !ally.IsAwake) continue;
+                if (FlatDistance(transform.position, ally.transform.position) <= buffRadius) return true;
+            }
+
+            var rangedAllies = FindObjectsByType<Project.Gameplay.EnemyRangedAI>(FindObjectsSortMode.None);
+            for (int i = 0; i < rangedAllies.Length; i++)
+            {
+                var ally = rangedAllies[i];
+                if (ally == null || ally.gameObject == gameObject || !ally.IsAwake) continue;
+                if (FlatDistance(transform.position, ally.transform.position) <= buffRadius) return true;
+            }
+
+            return false;
+        }
+
+        [Server]
         private void TryContactAttack(Transform target)
         {
             if (_contactAttackTimer > 0f)
@@ -228,6 +300,45 @@ namespace Project.Gameplay
 
             dir.Normalize();
             _rb.MoveRotation(Quaternion.LookRotation(dir, Vector3.up));
+        }
+
+        private void UpdateCastIndicator()
+        {
+            if (!_isCastingBuff)
+            {
+                if (_castIndicator != null)
+                    _castIndicator.SetActive(false);
+                return;
+            }
+
+            EnsureCastIndicator();
+            if (_castIndicator == null)
+                return;
+
+            _castIndicator.SetActive(true);
+            _castIndicator.transform.position = transform.position + Vector3.up * 1.8f;
+
+            float scale = 0.65f + Mathf.PingPong(Time.time * 3f, 0.2f);
+            _castIndicator.transform.localScale = new Vector3(scale, scale, scale);
+        }
+
+        private void EnsureCastIndicator()
+        {
+            if (_castIndicator != null)
+                return;
+
+            _castIndicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            _castIndicator.name = "SupportCastIndicator_Runtime";
+            Destroy(_castIndicator.GetComponent<Collider>());
+
+            var renderer = _castIndicator.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.GetPropertyBlock(_castIndicatorBlock);
+                _castIndicatorBlock.SetColor(ColorId, CastIndicatorColor);
+                _castIndicatorBlock.SetColor(BaseColorId, CastIndicatorColor);
+                renderer.SetPropertyBlock(_castIndicatorBlock);
+            }
         }
 
         private static float FlatDistance(Vector3 a, Vector3 b)

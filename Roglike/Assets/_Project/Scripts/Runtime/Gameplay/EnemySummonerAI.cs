@@ -8,6 +8,8 @@ namespace Project.Gameplay
     [RequireComponent(typeof(EnemyHealth))]
     public sealed class EnemySummonerAI : NetworkBehaviour
     {
+        private static readonly Color CastIndicatorColor = new(0.85f, 0.25f, 1f, 1f);
+
         [Header("Defaults")]
         [SerializeField] private int defaultDamage = 6;
         [SerializeField] private float defaultMoveSpeed = 2.7f;
@@ -23,12 +25,15 @@ namespace Project.Gameplay
         [SerializeField] private int summonCountPerCast = 1;
         [SerializeField] private int maxAliveSummons = 3;
         [SerializeField] private float summonCooldown = 5f;
+        [SerializeField] private float summonWindup = 1f;
+        [SerializeField] private float summonRecovery = 0.45f;
         [SerializeField] private float summonRadius = 2.5f;
         [SerializeField] private float summonHpMultiplier = 0.65f;
         [SerializeField] private float summonDamageMultiplier = 0.75f;
         [SerializeField] private float summonSpeedMultiplier = 1.05f;
 
         [SyncVar] public bool IsAwake;
+        [SyncVar] private bool _isSummoning;
         [SyncVar] private int _damage;
         [SyncVar] private float _moveSpeed;
 
@@ -36,12 +41,20 @@ namespace Project.Gameplay
         private EnemyHealth _health;
         private float _contactAttackTimer;
         private float _summonTimer;
+        private float _summonWindupTimer;
+        private float _summonRecoveryTimer;
         private readonly List<NetworkIdentity> _activeSummons = new List<NetworkIdentity>(8);
+        private GameObject _castIndicator;
+        private MaterialPropertyBlock _castIndicatorBlock;
+
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
 
         private void Awake()
         {
             _rb = GetComponent<Rigidbody>();
             _health = GetComponent<EnemyHealth>();
+            _castIndicatorBlock = new MaterialPropertyBlock();
         }
 
         public override void OnStartServer()
@@ -68,6 +81,11 @@ namespace Project.Gameplay
             IsAwake = true;
         }
 
+        private void Update()
+        {
+            UpdateCastIndicator();
+        }
+
         private void FixedUpdate()
         {
             if (!NetworkServer.active) return;
@@ -80,6 +98,30 @@ namespace Project.Gameplay
 
             _contactAttackTimer -= Time.fixedDeltaTime;
             _summonTimer -= Time.fixedDeltaTime;
+
+            if (_summonRecoveryTimer > 0f)
+            {
+                _summonRecoveryTimer -= Time.fixedDeltaTime;
+                LookAt(target.position);
+                return;
+            }
+
+            if (_isSummoning)
+            {
+                _summonWindupTimer -= Time.fixedDeltaTime;
+                LookAt(target.position);
+
+                if (_summonWindupTimer <= 0f)
+                {
+                    int summoned = TrySummonMinions();
+                    _isSummoning = false;
+                    _summonRecoveryTimer = summonRecovery;
+                    if (summoned > 0)
+                        _summonTimer = summonCooldown;
+                }
+
+                return;
+            }
 
             float dist = FlatDistance(_rb.position, target.position);
 
@@ -95,10 +137,18 @@ namespace Project.Gameplay
 
             if (_summonTimer <= 0f && _activeSummons.Count < maxAliveSummons)
             {
-                int summoned = TrySummonMinions();
-                if (summoned > 0)
-                    _summonTimer = summonCooldown;
+                StartSummonCast();
             }
+        }
+
+        [Server]
+        private void StartSummonCast()
+        {
+            if (summonPrefab == null)
+                return;
+
+            _isSummoning = true;
+            _summonWindupTimer = Mathf.Max(0.1f, summonWindup);
         }
 
         [Server]
@@ -186,6 +236,13 @@ namespace Project.Gameplay
             {
                 tankAi.ServerApplyScaling(summonDamage, summonSpeed);
                 tankAi.ServerWakeUp();
+            }
+
+            var assassinAi = summoned.GetComponent<EnemyAssassinAI>();
+            if (assassinAi != null)
+            {
+                assassinAi.ServerApplyScaling(summonDamage, summonSpeed);
+                assassinAi.ServerWakeUp();
             }
         }
 
@@ -279,6 +336,45 @@ namespace Project.Gameplay
 
             dir.Normalize();
             _rb.MoveRotation(Quaternion.LookRotation(dir, Vector3.up));
+        }
+
+        private void UpdateCastIndicator()
+        {
+            if (!_isSummoning)
+            {
+                if (_castIndicator != null)
+                    _castIndicator.SetActive(false);
+                return;
+            }
+
+            EnsureCastIndicator();
+            if (_castIndicator == null)
+                return;
+
+            _castIndicator.SetActive(true);
+            _castIndicator.transform.position = transform.position + Vector3.up * 1.9f;
+
+            float scale = 0.7f + Mathf.PingPong(Time.time * 3.5f, 0.2f);
+            _castIndicator.transform.localScale = new Vector3(scale, scale, scale);
+        }
+
+        private void EnsureCastIndicator()
+        {
+            if (_castIndicator != null)
+                return;
+
+            _castIndicator = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            _castIndicator.name = "SummonerCastIndicator_Runtime";
+            Destroy(_castIndicator.GetComponent<Collider>());
+
+            var renderer = _castIndicator.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.GetPropertyBlock(_castIndicatorBlock);
+                _castIndicatorBlock.SetColor(ColorId, CastIndicatorColor);
+                _castIndicatorBlock.SetColor(BaseColorId, CastIndicatorColor);
+                renderer.SetPropertyBlock(_castIndicatorBlock);
+            }
         }
 
         private static float FlatDistance(Vector3 a, Vector3 b)
