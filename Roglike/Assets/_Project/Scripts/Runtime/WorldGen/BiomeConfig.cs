@@ -8,6 +8,7 @@ namespace Project.WorldGen
     {
         public BiomeType biomeType;
         public string displayName;
+        public BiomeLayoutStyle layoutStyle;
 
         [Header("Segment Visuals")]
         public Material groundMaterial;

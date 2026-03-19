@@ -8,6 +8,40 @@ namespace Project.WorldGen.Generators
     // большие локации (узлы) + широкие тропы + декор.
     public sealed class RouteSegmentGeneratorWide : SegmentGeneratorBase
     {
+        private enum LocationShapeKind
+        {
+            WideField,
+            BrokenField,
+            OvalField,
+            ForestPocket,
+            ForestSplit,
+            NarrowClearing,
+            MountainShelf,
+            MountainSpine,
+            CoastalBend,
+            CoastalSpit,
+            HallCluster
+        }
+
+        private struct LayoutProfile
+        {
+            public int MainPathMin;
+            public int MainPathMax;
+            public float StepDistanceMin;
+            public float StepDistanceMax;
+            public float TurnAngleMaxDeg;
+            public Vector2 LocationSizeMin;
+            public Vector2 LocationSizeMax;
+            public float TrailWidth;
+            public float TrailTileLength;
+            public float TrailThickness;
+            public float TrailJitter;
+            public int DecorPerTrailTileMin;
+            public int DecorPerTrailTileMax;
+            public float DecorOffsetFromCenterMin;
+            public float DecorOffsetFromCenterMax;
+        }
+
         [Header("Layout")]
         [SerializeField] private int mainPathMin = 5;
         [SerializeField] private int mainPathMax = 7;
@@ -37,15 +71,25 @@ namespace Project.WorldGen.Generators
         [SerializeField] private Material trailMaterial;
         [SerializeField] private Material decorMaterial;
 
+        [Header("Organic Shapes")]
+        [SerializeField, Range(5, 12)] private int locationPatchSides = 8;
+        [SerializeField, Range(0f, 0.45f)] private float locationEdgeNoise = 0.18f;
+        [SerializeField, Range(0f, 0.35f)] private float trailEdgeNoise = 0.12f;
+
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static readonly int ColorId = Shader.PropertyToID("_Color");
 
         private Project.WorldGen.BiomeConfig _activeBiomeConfig;
+        private LayoutProfile _baseProfile;
+        private bool _baseProfileCaptured;
+        private Project.WorldGen.BiomeLayoutStyle _activeLayoutStyle;
 
         // ВАЖНО: Сигнатура как у твоего текущего генератора, чтобы ChunkDungeonController не менять
         public override void GenerateInto(int seed, int segmentIndex, Transform segmentRoot, Project.WorldGen.BiomeConfig biomeConfig)
         {
+            CaptureBaseProfileIfNeeded();
             _activeBiomeConfig = biomeConfig;
+            ApplyLayoutProfile(biomeConfig);
             var rng = new System.Random(seed);
 
             // контейнеры
@@ -145,7 +189,7 @@ namespace Project.WorldGen.Generators
             // ---- 3) строим геометрию локаций ----
             for (int i = 0; i < nodes.Count; i++)
             {
-                BuildLocation(nodes[i], segmentIndex, segmentRoot, geoRoot.transform, triggersRoot.transform, layout);
+                BuildLocation(nodes[i], segmentIndex, segmentRoot, geoRoot.transform, triggersRoot.transform, layout, rng);
             }
 
             // ---- 4) строим тропы main path ----
@@ -256,7 +300,7 @@ namespace Project.WorldGen.Generators
                 return bestPos;
             }
 
-            Debug.Log($"[RouteSegmentGeneratorWide] Generated seg={segmentIndex} nodes={nodes.Count} main={mainCount} branch={makeBranch}");
+            Debug.Log($"[RouteSegmentGeneratorWide] Generated seg={segmentIndex} biome={layout.BiomeDisplayName} style={_activeLayoutStyle} nodes={nodes.Count} main={mainCount} branch={makeBranch}");
         }
 
         // ------------------ building blocks ------------------
@@ -267,30 +311,22 @@ namespace Project.WorldGen.Generators
             Transform segmentRoot,
             Transform geoRoot,
             Transform triggersRoot,
-            Project.WorldGen.SegmentLayout layout)
+            Project.WorldGen.SegmentLayout layout,
+            System.Random rng)
         {
-            // Площадка (как большой низкий куб)
-            var locGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            locGO.name = n.isStart ? $"Location_Start_{n.index}" :
-                        n.isExit ? $"Location_Exit_{n.index}" :
-                        n.isSide ? $"Location_Side_{n.index}" :
-                        $"Location_{n.index}";
+            string locationName = n.isStart ? $"Location_Start_{n.index}" :
+                                  n.isExit ? $"Location_Exit_{n.index}" :
+                                  n.isSide ? $"Location_Side_{n.index}" :
+                                  $"Location_{n.index}";
 
-            locGO.transform.SetParent(geoRoot, false);
-            locGO.transform.localPosition = new Vector3(n.center.x, groundY, n.center.y);
-            locGO.transform.localScale = new Vector3(n.size.x, 1f, n.size.y);
+            var locRoot = new GameObject(locationName);
+            locRoot.transform.SetParent(geoRoot, false);
 
-            // === записываем RoomData в SegmentLayout ===
-            var centerWorld = locGO.transform.position;
-
-            // Size хранится по XZ, Y неважно
-            var sizeWorld = new Vector3(n.size.x, 0f, n.size.y);
-
-            // Bounds в мировых координатах
-            var bounds = new Bounds(centerWorld, new Vector3(n.size.x, 2f, n.size.y));
-
-            // DoorWorld: пока поставим "вперёд" (будем уточнять позже в конце генерации)
-            var doorWorld = centerWorld; // временно
+            Bounds locationBounds = BuildLocationSurface(locRoot.transform, n, rng);
+            var centerWorld = locationBounds.center;
+            var sizeWorld = new Vector3(locationBounds.size.x, 0f, locationBounds.size.z);
+            var bounds = new Bounds(centerWorld, new Vector3(locationBounds.size.x, 2f, locationBounds.size.z));
+            var doorWorld = centerWorld;
 
             layout.Rooms.Add(new Project.WorldGen.RoomData
             {
@@ -301,103 +337,281 @@ namespace Project.WorldGen.Generators
                 DoorWorld = doorWorld
             });
 
-            // делаем тонким “полом”
-            locGO.transform.localScale = new Vector3(n.size.x, 1f, n.size.y);
-            var col = locGO.GetComponent<BoxCollider>();
-            col.size = new Vector3(1f, trailThickness, 1f);
-            col.center = new Vector3(0f, trailThickness * 0.5f, 0f);
-
-            var r = locGO.GetComponent<Renderer>();
-            ApplySurfaceStyle(r, ResolveGroundMaterial(), ResolveGroundTint());
-
-            // RoomTrigger (активация врагов "при входе в локацию")
             var triggerGO = new GameObject($"RoomTrigger_{segmentIndex}_{n.index}");
             triggerGO.transform.SetParent(triggersRoot, false);
-            triggerGO.transform.localPosition = new Vector3(n.center.x, 1f, n.center.y);
+            triggerGO.transform.position = centerWorld + Vector3.up;
 
             var trig = triggerGO.AddComponent<BoxCollider>();
             trig.isTrigger = true;
-            trig.size = new Vector3(n.size.x * 0.9f, 3f, n.size.y * 0.9f);
+            trig.size = new Vector3(Mathf.Max(6f, bounds.size.x * 0.88f), 3f, Mathf.Max(6f, bounds.size.z * 0.88f));
 
             var rt = triggerGO.AddComponent<Project.WorldGen.RoomTrigger>();
-            rt.Init(segmentIndex, n.index); // <- это важно: метод Init, который ты добавлял/проверял
+            rt.Init(segmentIndex, n.index);
 
-            // Визуальные “границы” (чтобы игрок не уходил далеко): камни/пеньки по углам
-            // Это не стены-коридоры — просто мягкая рамка вокруг поляны.
-            BuildSoftBorder(geoRoot, n);
+            BuildSoftBorder(locRoot.transform, locationBounds, rng);
         }
 
-        private void BuildSoftBorder(Transform geoRoot, Node n)
+        private Bounds BuildLocationSurface(Transform parent, Node n, System.Random rng)
         {
-            // 4 "камня" по углам, чтобы локация визуально читалась
-            float hx = n.size.x * 0.5f;
-            float hz = n.size.y * 0.5f;
+            var chunkBounds = new List<Bounds>(6);
+            BuildLocationShape(chunkBounds, parent, n, rng);
 
-            Vector3[] corners =
+            Bounds combined = chunkBounds[0];
+            for (int i = 1; i < chunkBounds.Count; i++)
+                combined.Encapsulate(chunkBounds[i]);
+
+            return combined;
+        }
+
+        private void BuildLocationShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            switch (PickLocationShape(rng))
             {
-                new Vector3(n.center.x - hx, 0.6f, n.center.y - hz),
-                new Vector3(n.center.x - hx, 0.6f, n.center.y + hz),
-                new Vector3(n.center.x + hx, 0.6f, n.center.y - hz),
-                new Vector3(n.center.x + hx, 0.6f, n.center.y + hz),
+                case LocationShapeKind.WideField:
+                    BuildWideFieldShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.BrokenField:
+                    BuildBrokenFieldShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.OvalField:
+                    BuildOvalFieldShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.ForestPocket:
+                    BuildForestPocketShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.ForestSplit:
+                    BuildForestSplitShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.NarrowClearing:
+                    BuildNarrowClearingShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.MountainShelf:
+                    BuildMountainShelfShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.MountainSpine:
+                    BuildMountainSpineShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.CoastalBend:
+                    BuildCoastalBendShape(chunkBounds, parent, n, rng);
+                    break;
+                case LocationShapeKind.CoastalSpit:
+                    BuildCoastalSpitShape(chunkBounds, parent, n, rng);
+                    break;
+                default:
+                    BuildHallClusterShape(chunkBounds, parent, n, rng);
+                    break;
+            }
+        }
+
+        private LocationShapeKind PickLocationShape(System.Random rng)
+        {
+            return _activeLayoutStyle switch
+            {
+                Project.WorldGen.BiomeLayoutStyle.OpenFields => rng.Next(0, 3) switch
+                {
+                    0 => LocationShapeKind.WideField,
+                    1 => LocationShapeKind.BrokenField,
+                    _ => LocationShapeKind.OvalField
+                },
+                Project.WorldGen.BiomeLayoutStyle.ForestPaths => rng.Next(0, 3) switch
+                {
+                    0 => LocationShapeKind.ForestPocket,
+                    1 => LocationShapeKind.ForestSplit,
+                    _ => LocationShapeKind.NarrowClearing
+                },
+                Project.WorldGen.BiomeLayoutStyle.MountainPass => rng.Next(0, 2) == 0
+                    ? LocationShapeKind.MountainShelf
+                    : LocationShapeKind.MountainSpine,
+                Project.WorldGen.BiomeLayoutStyle.CoastalRoute => rng.Next(0, 2) == 0
+                    ? LocationShapeKind.CoastalBend
+                    : LocationShapeKind.CoastalSpit,
+                Project.WorldGen.BiomeLayoutStyle.DungeonHalls => LocationShapeKind.HallCluster,
+                _ => LocationShapeKind.WideField
+            };
+        }
+
+        private void BuildWideFieldShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, n.size, RandRange(rng, -12f, 12f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(n.size.x * 0.24f, RandRange(rng, -n.size.y * 0.12f, n.size.y * 0.12f)), n.size * 0.52f, RandRange(rng, -20f, 20f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(-n.size.x * 0.20f, RandRange(rng, -n.size.y * 0.10f, n.size.y * 0.10f)), n.size * 0.46f, RandRange(rng, -16f, 16f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(RandRange(rng, -n.size.x * 0.08f, n.size.x * 0.08f), n.size.y * 0.18f), new Vector2(n.size.x * 0.40f, n.size.y * 0.34f), RandRange(rng, -18f, 18f));
+        }
+
+        private void BuildBrokenFieldShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, n.size * 0.76f, RandRange(rng, -10f, 10f));
+            for (int i = 0; i < 4; i++)
+            {
+                Vector2 dir = RandomInsideUnitCircle(rng).normalized;
+                Vector2 center = n.center + new Vector2(dir.x * n.size.x * 0.26f, dir.y * n.size.y * 0.22f);
+                Vector2 size = new Vector2(n.size.x * RandRange(rng, 0.26f, 0.38f), n.size.y * RandRange(rng, 0.24f, 0.34f));
+                AddLocationChunk(chunkBounds, parent, center, size, RandRange(rng, -28f, 28f));
+            }
+        }
+
+        private void BuildOvalFieldShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, new Vector2(n.size.x * 0.82f, n.size.y * 0.64f), RandRange(rng, -24f, 24f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(0f, -n.size.y * 0.14f), new Vector2(n.size.x * 0.48f, n.size.y * 0.42f), RandRange(rng, -18f, 18f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(0f, n.size.y * 0.16f), new Vector2(n.size.x * 0.44f, n.size.y * 0.36f), RandRange(rng, -18f, 18f));
+        }
+
+        private void BuildForestPocketShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, n.size * 0.48f, RandRange(rng, -14f, 14f));
+            for (int i = 0; i < 4; i++)
+            {
+                float angle = (i / 4f) * Mathf.PI * 2f + RandRange(rng, -0.35f, 0.35f);
+                Vector2 dir = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                Vector2 center = n.center + new Vector2(dir.x * n.size.x * 0.18f, dir.y * n.size.y * 0.18f);
+                Vector2 size = new Vector2(n.size.x * RandRange(rng, 0.22f, 0.30f), n.size.y * RandRange(rng, 0.22f, 0.30f));
+                AddLocationChunk(chunkBounds, parent, center, size, RandRange(rng, -32f, 32f));
+            }
+        }
+
+        private void BuildForestSplitShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            Vector2 axis = RandomInsideUnitCircle(rng).normalized;
+            if (axis.sqrMagnitude < 0.01f)
+                axis = Vector2.right;
+
+            AddLocationChunk(chunkBounds, parent, n.center - axis * (n.size.x * 0.14f), new Vector2(n.size.x * 0.42f, n.size.y * 0.34f), RandRange(rng, -26f, 26f));
+            AddLocationChunk(chunkBounds, parent, n.center + axis * (n.size.x * 0.16f), new Vector2(n.size.x * 0.44f, n.size.y * 0.30f), RandRange(rng, -26f, 26f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(-axis.y, axis.x) * (n.size.y * 0.10f), new Vector2(n.size.x * 0.26f, n.size.y * 0.24f), RandRange(rng, -26f, 26f));
+        }
+
+        private void BuildNarrowClearingShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, new Vector2(n.size.x * 0.62f, n.size.y * 0.30f), RandRange(rng, -34f, 34f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(-n.size.x * 0.18f, 0f), new Vector2(n.size.x * 0.24f, n.size.y * 0.22f), RandRange(rng, -34f, 34f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(n.size.x * 0.18f, 0f), new Vector2(n.size.x * 0.24f, n.size.y * 0.22f), RandRange(rng, -34f, 34f));
+        }
+
+        private void BuildMountainShelfShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, new Vector2(n.size.x * 0.68f, n.size.y * 0.28f), RandRange(rng, -12f, 12f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(0f, n.size.y * 0.16f), new Vector2(n.size.x * 0.34f, n.size.y * 0.18f), RandRange(rng, -12f, 12f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(0f, -n.size.y * 0.16f), new Vector2(n.size.x * 0.28f, n.size.y * 0.16f), RandRange(rng, -12f, 12f));
+        }
+
+        private void BuildMountainSpineShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            Vector2 spineAxis = RandomInsideUnitCircle(rng).normalized;
+            if (spineAxis.sqrMagnitude < 0.01f)
+                spineAxis = Vector2.right;
+
+            AddLocationChunk(chunkBounds, parent, n.center, new Vector2(n.size.x * 0.34f, n.size.y * 0.52f), RandRange(rng, -24f, 24f));
+            AddLocationChunk(chunkBounds, parent, n.center + spineAxis * (n.size.x * 0.16f), new Vector2(n.size.x * 0.20f, n.size.y * 0.24f), RandRange(rng, -24f, 24f));
+            AddLocationChunk(chunkBounds, parent, n.center - spineAxis * (n.size.x * 0.18f), new Vector2(n.size.x * 0.18f, n.size.y * 0.22f), RandRange(rng, -24f, 24f));
+        }
+
+        private void BuildCoastalBendShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, new Vector2(n.size.x * 0.72f, n.size.y * 0.42f), RandRange(rng, -18f, 18f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(n.size.x * 0.18f, n.size.y * 0.10f), new Vector2(n.size.x * 0.30f, n.size.y * 0.24f), RandRange(rng, -18f, 18f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(-n.size.x * 0.16f, -n.size.y * 0.14f), new Vector2(n.size.x * 0.24f, n.size.y * 0.22f), RandRange(rng, -18f, 18f));
+        }
+
+        private void BuildCoastalSpitShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, new Vector2(n.size.x * 0.64f, n.size.y * 0.30f), RandRange(rng, -10f, 10f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(n.size.x * 0.26f, 0f), new Vector2(n.size.x * 0.22f, n.size.y * 0.16f), RandRange(rng, -10f, 10f));
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(-n.size.x * 0.22f, 0f), new Vector2(n.size.x * 0.18f, n.size.y * 0.14f), RandRange(rng, -10f, 10f));
+        }
+
+        private void BuildHallClusterShape(List<Bounds> chunkBounds, Transform parent, Node n, System.Random rng)
+        {
+            AddLocationChunk(chunkBounds, parent, n.center, n.size * 0.52f, 0f, 0.06f);
+            AddLocationChunk(chunkBounds, parent, n.center + new Vector2(n.size.x * 0.18f, 0f), new Vector2(n.size.x * 0.20f, n.size.y * 0.22f), 0f, 0.06f);
+            AddLocationChunk(chunkBounds, parent, n.center - new Vector2(n.size.x * 0.18f, 0f), new Vector2(n.size.x * 0.20f, n.size.y * 0.22f), 0f, 0.06f);
+        }
+
+        private void AddLocationChunk(List<Bounds> chunkBounds, Transform parent, Vector2 center, Vector2 size, float rotationDeg = 0f, float yOffset = 0f)
+        {
+            var chunk = CreateGroundPatchObject("LocationChunk", parent, center, size, ResolveGroundMaterial(), ResolveGroundTint());
+            chunk.transform.localRotation = Quaternion.Euler(0f, rotationDeg, 0f);
+            if (Mathf.Abs(yOffset) > 0.001f)
+                chunk.transform.localPosition += Vector3.up * yOffset;
+
+            chunkBounds.Add(new Bounds(chunk.transform.position, new Vector3(size.x, trailThickness, size.y)));
+        }
+
+        private void BuildSoftBorder(Transform geoRoot, Bounds locationBounds, System.Random rng)
+        {
+            int borderPieces = _activeLayoutStyle switch
+            {
+                Project.WorldGen.BiomeLayoutStyle.OpenFields => 8,
+                Project.WorldGen.BiomeLayoutStyle.ForestPaths => 14,
+                Project.WorldGen.BiomeLayoutStyle.MountainPass => 12,
+                Project.WorldGen.BiomeLayoutStyle.CoastalRoute => 10,
+                Project.WorldGen.BiomeLayoutStyle.DungeonHalls => 8,
+                _ => 8
             };
 
-            for (int i = 0; i < corners.Length; i++)
+            float hx = locationBounds.extents.x;
+            float hz = locationBounds.extents.z;
+            Vector3 center = locationBounds.center;
+
+            for (int i = 0; i < borderPieces; i++)
             {
-                var rock = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                float t = i / (float)borderPieces;
+                float angle = t * Mathf.PI * 2f;
+                Vector2 dir = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                float radiusX = hx + RandRange(rng, 0.8f, 2.2f);
+                float radiusZ = hz + RandRange(rng, 0.8f, 2.2f);
+                Vector3 pos = center + new Vector3(dir.x * radiusX, 0.6f, dir.y * radiusZ);
+
+                var rock = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 rock.name = "Rock";
                 rock.transform.SetParent(geoRoot, false);
-                rock.transform.localPosition = corners[i];
-                rock.transform.localScale = new Vector3(1.6f, 1.2f, 1.6f);
+                rock.transform.position = pos;
+                rock.transform.localRotation = Quaternion.Euler(0f, angle * Mathf.Rad2Deg + RandRange(rng, -18f, 18f), 0f);
+
+                Vector3 scale = _activeLayoutStyle switch
+                {
+                    Project.WorldGen.BiomeLayoutStyle.OpenFields => new Vector3(RandRange(rng, 1.2f, 1.8f), RandRange(rng, 0.7f, 1.1f), RandRange(rng, 1.2f, 1.8f)),
+                    Project.WorldGen.BiomeLayoutStyle.ForestPaths => new Vector3(RandRange(rng, 1.4f, 2.1f), RandRange(rng, 1.2f, 2.4f), RandRange(rng, 1.4f, 2.1f)),
+                    Project.WorldGen.BiomeLayoutStyle.MountainPass => new Vector3(RandRange(rng, 1.8f, 2.8f), RandRange(rng, 1.4f, 2.8f), RandRange(rng, 1.8f, 2.8f)),
+                    Project.WorldGen.BiomeLayoutStyle.CoastalRoute => new Vector3(RandRange(rng, 1.3f, 2.0f), RandRange(rng, 0.9f, 1.5f), RandRange(rng, 1.3f, 2.0f)),
+                    Project.WorldGen.BiomeLayoutStyle.DungeonHalls => new Vector3(RandRange(rng, 1.0f, 1.4f), RandRange(rng, 1.4f, 2.2f), RandRange(rng, 1.0f, 1.4f)),
+                    _ => new Vector3(1.6f, 1.2f, 1.6f)
+                };
+                rock.transform.localScale = scale;
 
                 var rr = rock.GetComponent<Renderer>();
                 ApplySurfaceStyle(rr, ResolveDecorMaterial(), ResolveDecorTint());
             }
         }
-
         private void BuildTrail(int seed, Transform segmentRoot, Transform geoRoot, System.Random rng, Vector2 a, Vector2 b)
         {
-            // делаем дорогу из нескольких перекрывающихся "плиток" (кубы-полосы)
             Vector2 dir = (b - a);
             float dist = dir.magnitude;
             if (dist < 0.001f) return;
             dir /= dist;
 
             int tiles = Mathf.CeilToInt(dist / trailTileLength);
-
-            // перпендикуляр для декора по краям
             Vector2 perp = new Vector2(-dir.y, dir.x);
 
             for (int i = 0; i <= tiles; i++)
             {
                 float t = (tiles == 0) ? 0f : (i / (float)tiles);
                 Vector2 p = Vector2.Lerp(a, b, t);
-
-                // лёгкий jitter, чтобы не была идеальная прямая
                 float j = RandRange(rng, -trailJitter, trailJitter);
                 Vector2 pj = p + perp * j;
 
-                // плитка дороги
-                var tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                tile.name = "TrailTile";
-                tile.transform.SetParent(geoRoot, false);
-                tile.transform.localPosition = new Vector3(pj.x, groundY + 0.05f, pj.y);
-
-                // ориентируем по направлению
-                float yaw = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
-                tile.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
-
-                // ширина дороги + небольшой запас, чтобы не было дыр
                 float length = trailTileLength * 1.15f;
-                tile.transform.localScale = new Vector3(trailWidth, 1f, length);
+                CreateTrailPatchObject(
+                    "TrailTile",
+                    geoRoot,
+                    pj,
+                    dir,
+                    trailWidth,
+                    length,
+                    ResolveTrailMaterial(),
+                    ResolveTrailTint(),
+                    rng);
 
-                var col = tile.GetComponent<BoxCollider>();
-                col.size = new Vector3(1f, trailThickness, 1f);
-                col.center = new Vector3(0f, trailThickness * 0.5f + 0.05f, 0f);
-
-                var r = tile.GetComponent<Renderer>();
-                ApplySurfaceStyle(r, ResolveTrailMaterial(), ResolveTrailTint());
-
-                // декор — НЕ по центру дороги, а по бокам
                 int decorCount = rng.Next(decorPerTrailTileMin, decorPerTrailTileMax + 1);
                 for (int d = 0; d < decorCount; d++)
                 {
@@ -405,7 +619,7 @@ namespace Project.WorldGen.Generators
                     float off = RandRange(rng, decorOffsetFromCenterMin, decorOffsetFromCenterMax);
                     Vector2 dp = pj + perp * side * off;
 
-                    var deco = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    var deco = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                     deco.name = "TrailDecor";
                     deco.transform.SetParent(geoRoot, false);
                     deco.transform.localPosition = new Vector3(dp.x, 0.6f, dp.y);
@@ -417,6 +631,112 @@ namespace Project.WorldGen.Generators
             }
         }
 
+        private GameObject CreateGroundPatchObject(string name, Transform parent, Vector2 center, Vector2 size, Material materialOverride, Color tint)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(center.x, groundY, center.y);
+
+            var mesh = BuildIrregularPatchMesh(size, locationEdgeNoise, locationPatchSides);
+            var filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+
+            var renderer = go.AddComponent<MeshRenderer>();
+            ApplySurfaceStyle(renderer, materialOverride, tint);
+
+            var collider = go.AddComponent<MeshCollider>();
+            collider.sharedMesh = mesh;
+
+            return go;
+        }
+
+        private void CreateTrailPatchObject(string name, Transform parent, Vector2 center, Vector2 direction, float width, float length, Material materialOverride, Color tint, System.Random rng)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(center.x, groundY + 0.05f, center.y);
+
+            var mesh = BuildTrailPatchMesh(direction, width, length, rng);
+            var filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+
+            var renderer = go.AddComponent<MeshRenderer>();
+            ApplySurfaceStyle(renderer, materialOverride, tint);
+
+            var collider = go.AddComponent<MeshCollider>();
+            collider.sharedMesh = mesh;
+        }
+
+        private Mesh BuildIrregularPatchMesh(Vector2 size, float edgeNoise, int sides)
+        {
+            int ringCount = Mathf.Max(5, sides);
+            var vertices = new Vector3[ringCount + 1];
+            var triangles = new int[ringCount * 3];
+            var uvs = new Vector2[vertices.Length];
+
+            vertices[0] = Vector3.zero;
+            uvs[0] = new Vector2(0.5f, 0.5f);
+
+            float halfX = size.x * 0.5f;
+            float halfZ = size.y * 0.5f;
+            for (int i = 0; i < ringCount; i++)
+            {
+                float t = i / (float)ringCount;
+                float angle = t * Mathf.PI * 2f;
+                float noise = 1f + Mathf.Sin(angle * 2f) * edgeNoise * 0.45f + Mathf.Cos(angle * 3f) * edgeNoise * 0.35f;
+                float x = Mathf.Cos(angle) * halfX * noise;
+                float z = Mathf.Sin(angle) * halfZ * noise;
+                vertices[i + 1] = new Vector3(x, 0f, z);
+                uvs[i + 1] = new Vector2((x / Mathf.Max(0.01f, size.x)) + 0.5f, (z / Mathf.Max(0.01f, size.y)) + 0.5f);
+            }
+
+            for (int i = 0; i < ringCount; i++)
+            {
+                int tri = i * 3;
+                triangles[tri] = 0;
+                triangles[tri + 1] = i + 1;
+                triangles[tri + 2] = (i == ringCount - 1) ? 1 : i + 2;
+            }
+
+            var mesh = new Mesh { name = "IrregularPatch" };
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.uv = uvs;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private Mesh BuildTrailPatchMesh(Vector2 direction, float width, float length, System.Random rng)
+        {
+            Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector2.up;
+            Vector2 perp = new Vector2(-dir.y, dir.x);
+
+            float halfWidth = width * 0.5f;
+            float halfLength = length * 0.5f;
+            float widthNoise = width * trailEdgeNoise;
+            float aNoise = RandRange(rng, -widthNoise, widthNoise);
+            float bNoise = RandRange(rng, -widthNoise, widthNoise);
+
+            Vector3 v0 = new Vector3((-dir.x * halfLength) + (perp.x * (halfWidth + aNoise)), 0f, (-dir.y * halfLength) + (perp.y * (halfWidth + aNoise)));
+            Vector3 v1 = new Vector3((-dir.x * halfLength) - (perp.x * (halfWidth - aNoise)), 0f, (-dir.y * halfLength) - (perp.y * (halfWidth - aNoise)));
+            Vector3 v2 = new Vector3((dir.x * halfLength) + (perp.x * (halfWidth + bNoise)), 0f, (dir.y * halfLength) + (perp.y * (halfWidth + bNoise)));
+            Vector3 v3 = new Vector3((dir.x * halfLength) - (perp.x * (halfWidth - bNoise)), 0f, (dir.y * halfLength) - (perp.y * (halfWidth - bNoise)));
+
+            var mesh = new Mesh { name = "TrailPatch" };
+            mesh.vertices = new[] { v0, v1, v2, v3 };
+            mesh.triangles = new[] { 0, 2, 1, 2, 3, 1 };
+            mesh.uv = new[]
+            {
+                new Vector2(0f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(0f, 1f),
+                new Vector2(1f, 1f)
+            };
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
         private Material ResolveGroundMaterial()
         {
             return _activeBiomeConfig != null && _activeBiomeConfig.groundMaterial != null
@@ -468,6 +788,142 @@ namespace Project.WorldGen.Generators
             renderer.SetPropertyBlock(propertyBlock);
         }
 
+        private void CaptureBaseProfileIfNeeded()
+        {
+            if (_baseProfileCaptured)
+                return;
+
+            _baseProfile = new LayoutProfile
+            {
+                MainPathMin = mainPathMin,
+                MainPathMax = mainPathMax,
+                StepDistanceMin = stepDistanceMin,
+                StepDistanceMax = stepDistanceMax,
+                TurnAngleMaxDeg = turnAngleMaxDeg,
+                LocationSizeMin = locationSizeMin,
+                LocationSizeMax = locationSizeMax,
+                TrailWidth = trailWidth,
+                TrailTileLength = trailTileLength,
+                TrailThickness = trailThickness,
+                TrailJitter = trailJitter,
+                DecorPerTrailTileMin = decorPerTrailTileMin,
+                DecorPerTrailTileMax = decorPerTrailTileMax,
+                DecorOffsetFromCenterMin = decorOffsetFromCenterMin,
+                DecorOffsetFromCenterMax = decorOffsetFromCenterMax
+            };
+
+            _baseProfileCaptured = true;
+        }
+
+        private void ApplyLayoutProfile(Project.WorldGen.BiomeConfig biomeConfig)
+        {
+            mainPathMin = _baseProfile.MainPathMin;
+            mainPathMax = _baseProfile.MainPathMax;
+            stepDistanceMin = _baseProfile.StepDistanceMin;
+            stepDistanceMax = _baseProfile.StepDistanceMax;
+            turnAngleMaxDeg = _baseProfile.TurnAngleMaxDeg;
+            locationSizeMin = _baseProfile.LocationSizeMin;
+            locationSizeMax = _baseProfile.LocationSizeMax;
+            trailWidth = _baseProfile.TrailWidth;
+            trailTileLength = _baseProfile.TrailTileLength;
+            trailThickness = _baseProfile.TrailThickness;
+            trailJitter = _baseProfile.TrailJitter;
+            decorPerTrailTileMin = _baseProfile.DecorPerTrailTileMin;
+            decorPerTrailTileMax = _baseProfile.DecorPerTrailTileMax;
+            decorOffsetFromCenterMin = _baseProfile.DecorOffsetFromCenterMin;
+            decorOffsetFromCenterMax = _baseProfile.DecorOffsetFromCenterMax;
+
+            _activeLayoutStyle = biomeConfig != null ? biomeConfig.layoutStyle : Project.WorldGen.BiomeLayoutStyle.OpenFields;
+
+            switch (_activeLayoutStyle)
+            {
+                case Project.WorldGen.BiomeLayoutStyle.OpenFields:
+                    mainPathMin = 4;
+                    mainPathMax = 6;
+                    stepDistanceMin = 26f;
+                    stepDistanceMax = 36f;
+                    turnAngleMaxDeg = 20f;
+                    locationSizeMin = new Vector2(24f, 22f);
+                    locationSizeMax = new Vector2(36f, 30f);
+                    trailWidth = 10f;
+                    trailTileLength = 7.5f;
+                    trailJitter = 0.45f;
+                    decorPerTrailTileMin = 0;
+                    decorPerTrailTileMax = 1;
+                    decorOffsetFromCenterMin = 5.5f;
+                    decorOffsetFromCenterMax = 8f;
+                    break;
+
+                case Project.WorldGen.BiomeLayoutStyle.ForestPaths:
+                    mainPathMin = 6;
+                    mainPathMax = 8;
+                    stepDistanceMin = 18f;
+                    stepDistanceMax = 26f;
+                    turnAngleMaxDeg = 45f;
+                    locationSizeMin = new Vector2(16f, 16f);
+                    locationSizeMax = new Vector2(24f, 22f);
+                    trailWidth = 5.5f;
+                    trailTileLength = 5f;
+                    trailJitter = 1.8f;
+                    decorPerTrailTileMin = 2;
+                    decorPerTrailTileMax = 4;
+                    decorOffsetFromCenterMin = 2.6f;
+                    decorOffsetFromCenterMax = 5f;
+                    break;
+
+                case Project.WorldGen.BiomeLayoutStyle.MountainPass:
+                    mainPathMin = 5;
+                    mainPathMax = 7;
+                    stepDistanceMin = 20f;
+                    stepDistanceMax = 28f;
+                    turnAngleMaxDeg = 30f;
+                    locationSizeMin = new Vector2(16f, 14f);
+                    locationSizeMax = new Vector2(22f, 20f);
+                    trailWidth = 5f;
+                    trailTileLength = 5.5f;
+                    trailJitter = 0.9f;
+                    decorPerTrailTileMin = 1;
+                    decorPerTrailTileMax = 3;
+                    decorOffsetFromCenterMin = 3.5f;
+                    decorOffsetFromCenterMax = 6.5f;
+                    break;
+
+                case Project.WorldGen.BiomeLayoutStyle.CoastalRoute:
+                    mainPathMin = 5;
+                    mainPathMax = 7;
+                    stepDistanceMin = 24f;
+                    stepDistanceMax = 34f;
+                    turnAngleMaxDeg = 28f;
+                    locationSizeMin = new Vector2(20f, 18f);
+                    locationSizeMax = new Vector2(30f, 24f);
+                    trailWidth = 7f;
+                    trailTileLength = 6.5f;
+                    trailJitter = 0.8f;
+                    decorPerTrailTileMin = 1;
+                    decorPerTrailTileMax = 2;
+                    decorOffsetFromCenterMin = 4.5f;
+                    decorOffsetFromCenterMax = 7f;
+                    break;
+
+                case Project.WorldGen.BiomeLayoutStyle.DungeonHalls:
+                    mainPathMin = 5;
+                    mainPathMax = 6;
+                    stepDistanceMin = 16f;
+                    stepDistanceMax = 22f;
+                    turnAngleMaxDeg = 18f;
+                    locationSizeMin = new Vector2(14f, 14f);
+                    locationSizeMax = new Vector2(20f, 18f);
+                    trailWidth = 4.5f;
+                    trailTileLength = 4.5f;
+                    trailJitter = 0.2f;
+                    decorPerTrailTileMin = 0;
+                    decorPerTrailTileMax = 1;
+                    decorOffsetFromCenterMin = 2f;
+                    decorOffsetFromCenterMax = 3.2f;
+                    break;
+            }
+        }
+
         // ------------------ helpers ------------------
 
         private static float RandRange(System.Random rng, float min, float max)
@@ -489,6 +945,13 @@ namespace Project.WorldGen.Generators
             // стартовое направление
             float a = RandRange(rng, 0f, 360f) * Mathf.Deg2Rad;
             return new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+        }
+
+        private static Vector2 RandomInsideUnitCircle(System.Random rng)
+        {
+            float angle = RandRange(rng, 0f, Mathf.PI * 2f);
+            float radius = Mathf.Sqrt(RandRange(rng, 0f, 1f));
+            return new Vector2(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius);
         }
 
         private static Vector2 TurnDir(System.Random rng, Vector2 dir, float maxAngleDeg)
@@ -524,3 +987,6 @@ namespace Project.WorldGen.Generators
         }
     }
 }
+
+
+

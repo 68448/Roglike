@@ -60,7 +60,8 @@ namespace Project.WorldGen
             var config = new BiomeConfig
             {
                 biomeType = biomeType,
-                displayName = BiomeService.GetDisplayName(biomeType)
+                displayName = BiomeService.GetDisplayName(biomeType),
+                layoutStyle = GetDefaultLayoutStyle(biomeType)
             };
 
             switch (biomeType)
@@ -121,6 +122,20 @@ namespace Project.WorldGen
             }
 
             return config;
+        }
+
+        private static BiomeLayoutStyle GetDefaultLayoutStyle(BiomeType biomeType)
+        {
+            return biomeType switch
+            {
+                BiomeType.Shire => BiomeLayoutStyle.OpenFields,
+                BiomeType.Rivendell => BiomeLayoutStyle.ForestPaths,
+                BiomeType.MistyMountains => BiomeLayoutStyle.MountainPass,
+                BiomeType.Mirkwood => BiomeLayoutStyle.ForestPaths,
+                BiomeType.GreyHavens => BiomeLayoutStyle.CoastalRoute,
+                BiomeType.LonelyMountain => BiomeLayoutStyle.MountainPass,
+                _ => BiomeLayoutStyle.OpenFields
+            };
         }
     }
 }
